@@ -10,6 +10,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
 
   # State Management & Navigation
   flutter_riverpod: ^2.6.1
@@ -27,7 +29,7 @@ dependencies:
   printing: ^5.13.1
 
   # UI & Fonts
-  intl: ^0.19.0
+  intl: ^0.20.2
   google_fonts: ^6.2.1
   fl_chart: ^0.69.0
 
@@ -53,10 +55,6 @@ flutter:
     - family: Cairo
       fonts:
         - asset: assets/fonts/Cairo-Regular.ttf
-        - asset: assets/fonts/Cairo-Medium.ttf
-          weight: 500
-        - asset: assets/fonts/Cairo-SemiBold.ttf
-          weight: 600
         - asset: assets/fonts/Cairo-Bold.ttf
           weight: 700
 

@@ -1,6 +1,7 @@
 // lib/app/app.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'router/app_router.dart';
 import 'theme/app_theme.dart';
 
@@ -18,6 +19,11 @@ class StudioManagementApp extends ConsumerWidget {
       supportedLocales: const [
         Locale('ar'),
         Locale('en'),
+      ],
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
       ],
       builder: (context, child) {
         return Directionality(
