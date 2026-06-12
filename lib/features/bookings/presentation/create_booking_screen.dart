@@ -1,24 +1,26 @@
 // lib/features/bookings/presentation/create_booking_screen.dart
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 import 'package:drift/drift.dart' hide Column;
 import '../../../app/theme/app_colors.dart';
-import '../../../core/providers/database_provider.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../database/app_database.dart';
+import '../../../core/di/service_locator.dart';
+import '../bloc/bookings_bloc.dart';
 
-class CreateBookingScreen extends ConsumerStatefulWidget {
+class CreateBookingScreen extends StatefulWidget {
   final int? editBookingId;
   const CreateBookingScreen({super.key, this.editBookingId});
 
   @override
-  ConsumerState<CreateBookingScreen> createState() =>
+  State<CreateBookingScreen> createState() =>
       _CreateBookingScreenState();
 }
 
-class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
+class _CreateBookingScreenState extends State<CreateBookingScreen> {
   final _formKey = GlobalKey<FormState>();
 
   // Controllers
@@ -30,19 +32,68 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
   final _totalCtrl = TextEditingController(text: '0');
   final _paidCtrl = TextEditingController(text: '0');
   final _notesCtrl = TextEditingController();
+  final _timeCtrl = TextEditingController();
 
   // State
   DateTime _selectedDate = DateTime.now();
   String? _eventType;
+  // ignore: prefer_final_fields
   Set<String> _selectedServices = {};
   String _status = 'confirmed';
   bool _isLoading = false;
   String _errorMessage = '';
+  bool _isEditMode = false;
+  Booking? _existingBooking;
+  Customer? _existingCustomer;
+  bool _prefilled = false; // guard against double-init
 
   double get _remaining {
     final total = double.tryParse(_totalCtrl.text) ?? 0;
     final paid = double.tryParse(_paidCtrl.text) ?? 0;
     return total - paid;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.editBookingId != null) {
+      _isEditMode = true;
+      _loadExistingBooking();
+    }
+  }
+
+  /// Load the existing booking from DB and prefill all controllers.
+  Future<void> _loadExistingBooking() async {
+    if (_prefilled) return;
+    _prefilled = true;
+    try {
+      final db = sl<AppDatabase>();
+      final booking = await db.getBookingById(widget.editBookingId!);
+      if (booking == null) return;
+      final customer = await db.getCustomerById(booking.customerId);
+      final services = await db.getServicesForBooking(widget.editBookingId!);
+
+      if (!mounted) return;
+      setState(() {
+        _existingBooking = booking;
+        _existingCustomer = customer;
+
+        // Prefill controllers
+        _nameCtrl.text = customer?.name ?? '';
+        _phoneCtrl.text = customer?.phone ?? '';
+        _socialCtrl.text = customer?.social ?? '';
+        _venueCtrl.text = booking.venue ?? '';
+        _staffCtrl.text = booking.staff ?? '';
+        _totalCtrl.text = booking.totalAmount.toStringAsFixed(0);
+        _paidCtrl.text = booking.paidAmount.toStringAsFixed(0);
+        _notesCtrl.text = booking.notes ?? '';
+        _timeCtrl.text = booking.timeStart ?? '';
+        _selectedDate = booking.bookingDate;
+        _eventType = booking.eventType;
+        _selectedServices = services.map((s) => s.serviceName).toSet();
+        _status = booking.status;
+      });
+    } catch (_) {}
   }
 
   @override
@@ -55,7 +106,45 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
     _totalCtrl.dispose();
     _paidCtrl.dispose();
     _notesCtrl.dispose();
+    _timeCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _selectTime(BuildContext context) async {
+    final TimeOfDay? picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.now(),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: AppColors.primary,
+              onPrimary: Colors.white,
+              onSurface: AppColors.textPrimary,
+            ),
+            textButtonTheme: TextButtonThemeData(
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.primary,
+                textStyle: const TextStyle(fontFamily: 'Cairo'),
+              ),
+            ),
+          ),
+          child: Directionality(
+            textDirection: TextDirection.rtl,
+            child: child!,
+          ),
+        );
+      },
+    );
+
+    if (picked != null) {
+      final hour = picked.hourOfPeriod == 0 ? 12 : picked.hourOfPeriod;
+      final minute = picked.minute.toString().padLeft(2, '0');
+      final period = picked.period == DayPeriod.am ? 'ص' : 'م';
+      setState(() {
+        _timeCtrl.text = '$hour:$minute $period';
+      });
+    }
   }
 
   Future<void> _save() async {
@@ -64,15 +153,90 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
       setState(() => _errorMessage = 'الرجاء اختيار نوع المناسبة');
       return;
     }
+    if (_timeCtrl.text.trim().isEmpty) {
+      setState(() => _errorMessage = 'الرجاء اختيار وقت الحجز');
+      return;
+    }
+
+    if (!_isEditMode) {
+      final today = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
+      final selectedDateOnly = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
+      if (selectedDateOnly.isBefore(today)) {
+        setState(() {
+          _errorMessage = 'تاريخ الحجز لا يمكن أن يكون في الماضي';
+        });
+        return;
+      }
+    }
 
     setState(() {
       _isLoading = true;
       _errorMessage = '';
     });
 
-    final db = ref.read(databaseProvider);
+    final db = sl<AppDatabase>();
+    final total = double.tryParse(_totalCtrl.text) ?? 0;
+    final paid = double.tryParse(_paidCtrl.text) ?? 0;
 
     try {
+      // ─── EDIT MODE ────────────────────────────────────────────
+      if (_isEditMode && _existingBooking != null) {
+        // Update customer info
+        if (_existingCustomer != null) {
+          await db.updateCustomer(
+            CustomersTableCompanion(
+              id: Value(_existingCustomer!.id),
+              name: Value(_nameCtrl.text.trim()),
+              phone: Value(_phoneCtrl.text.trim()),
+              social: Value(_socialCtrl.text.trim().isEmpty
+                  ? null
+                  : _socialCtrl.text.trim()),
+            ),
+          );
+        }
+
+        final updatedBooking = BookingsTableCompanion(
+          id: Value(_existingBooking!.id),
+          bookingNumber: Value(_existingBooking!.bookingNumber),
+          customerId: Value(_existingBooking!.customerId),
+          eventType: Value(_eventType!),
+          bookingDate: Value(_selectedDate),
+          venue: Value(_venueCtrl.text.trim().isEmpty
+              ? null
+              : _venueCtrl.text.trim()),
+          staff: Value(_staffCtrl.text.trim().isEmpty
+              ? null
+              : _staffCtrl.text.trim()),
+          timeStart: Value(_timeCtrl.text.trim().isEmpty
+              ? null
+              : _timeCtrl.text.trim()),
+          totalAmount: Value(total),
+          paidAmount: Value(paid),
+          remainingAmount: Value(total - paid),
+          status: Value(_status),
+          notes: Value(_notesCtrl.text.trim().isEmpty
+              ? null
+              : _notesCtrl.text.trim()),
+          updatedAt: Value(DateTime.now()),
+        );
+
+        if (mounted) {
+          context.read<BookingsBloc>().add(
+                UpdateBookingEvent(updatedBooking, _selectedServices.toList()),
+              );
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('تم تحديث الحجز بنجاح',
+                  style: TextStyle(fontFamily: 'Cairo')),
+              backgroundColor: AppColors.success,
+            ),
+          );
+          context.go('/bookings/${_existingBooking!.id}');
+        }
+        return;
+      }
+
+      // ─── CREATE MODE ──────────────────────────────────────────
       // Check for duplicate booking
       final isDuplicate = await db.isDateBooked(_selectedDate);
       final allowDuplicates =
@@ -119,9 +283,6 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
       final bookingNumber =
           'BK-${uuid.v4().substring(0, 4).toUpperCase()}';
 
-      final total = double.tryParse(_totalCtrl.text) ?? 0;
-      final paid = double.tryParse(_paidCtrl.text) ?? 0;
-
       // Insert booking
       final bookingId = await db.insertBooking(
         BookingsTableCompanion.insert(
@@ -135,6 +296,9 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
           staff: Value(_staffCtrl.text.trim().isEmpty
               ? null
               : _staffCtrl.text.trim()),
+          timeStart: Value(_timeCtrl.text.trim().isEmpty
+              ? null
+              : _timeCtrl.text.trim()),
           totalAmount: Value(total),
           paidAmount: Value(paid),
           remainingAmount: Value(total - paid),
@@ -161,6 +325,7 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
       }
 
       if (mounted) {
+        context.read<BookingsBloc>().add(LoadAllBookings());
         context.go('/bookings/$bookingId');
       }
     } catch (e) {
@@ -206,7 +371,7 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
       child: Row(
         children: [
           Text(
-            'إنشاء حجز جديد',
+            _isEditMode ? 'تعديل الحجز' : 'إنشاء حجز جديد',
             style: Theme.of(context).textTheme.headlineSmall,
           ),
           const SizedBox(width: 8),
@@ -537,19 +702,30 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
                           label: 'الاسم الكامل',
                           hint: 'مثلاً: محمد عبدالله',
                           controller: _nameCtrl,
-                          validator: (v) =>
-                              v == null || v.isEmpty ? 'الاسم مطلوب' : null,
+                          validator: (v) {
+                            if (v == null || v.trim().isEmpty) return 'اسم العميل مطلوب';
+                            if (v.trim().length < 3) return 'الاسم لا يقل عن 3 أحرف';
+                            return null;
+                          },
                         ),
                       ),
                       const SizedBox(width: 16),
                       Expanded(
                         child: _FormField(
                           label: 'رقم الهاتف',
-                          hint: '966-05xxxxxxxx',
+                          hint: 'مثلاً: 01xxxxxxxxx',
                           controller: _phoneCtrl,
                           keyboardType: TextInputType.phone,
-                          validator: (v) =>
-                              v == null || v.isEmpty ? 'رقم الهاتف مطلوب' : null,
+                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                          validator: (v) {
+                            if (v == null || v.trim().isEmpty) return 'رقم الهاتف مطلوب';
+                            final trimmed = v.trim();
+                            if (!RegExp(r'^[0-9]+$').hasMatch(trimmed)) return 'يجب إدخال أرقام فقط';
+                            if (trimmed.length < 10 || trimmed.length > 15) {
+                              return 'رقم الهاتف يجب أن يكون بين 10 و 15 رقماً';
+                            }
+                            return null;
+                          },
                         ),
                       ),
                     ],
@@ -572,41 +748,69 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'نوع المناسبة',
-                    style: TextStyle(
-                      fontFamily: 'Cairo',
-                      fontSize: 13,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<String>(
-                    value: _eventType,
-                    hint: const Text(
-                      'اختر نوع المناسبة...',
-                      style: TextStyle(fontFamily: 'Cairo', fontSize: 14),
-                    ),
-                    decoration: InputDecoration(
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 12),
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide:
-                              const BorderSide(color: AppColors.border)),
-                      enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide:
-                              const BorderSide(color: AppColors.border)),
-                    ),
-                    items: AppConstants.eventTypes
-                        .map((e) => DropdownMenuItem(
-                              value: e['key'],
-                              child: Text(e['label']!,
-                                  style: const TextStyle(fontFamily: 'Cairo')),
-                            ))
-                        .toList(),
-                    onChanged: (v) => setState(() => _eventType = v),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'نوع المناسبة',
+                              style: TextStyle(
+                                fontFamily: 'Cairo',
+                                fontSize: 13,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            DropdownButtonFormField<String>(
+                              value: _eventType,
+                              hint: const Text(
+                                'اختر نوع المناسبة...',
+                                style: TextStyle(fontFamily: 'Cairo', fontSize: 14),
+                              ),
+                              decoration: InputDecoration(
+                                contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 16, vertical: 12),
+                                border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                    borderSide:
+                                        const BorderSide(color: AppColors.border)),
+                                enabledBorder: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                    borderSide:
+                                        const BorderSide(color: AppColors.border)),
+                              ),
+                              items: AppConstants.eventTypes
+                                  .map((e) => DropdownMenuItem(
+                                        value: e['key'],
+                                        child: Text(e['label']!,
+                                            style: const TextStyle(fontFamily: 'Cairo')),
+                                      ))
+                                  .toList(),
+                              onChanged: (v) => setState(() => _eventType = v),
+                              validator: (v) => v == null ? 'نوع المناسبة مطلوب' : null,
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => _selectTime(context),
+                          child: AbsorbPointer(
+                            child: _FormField(
+                              label: 'وقت الحجز',
+                              hint: 'اختر الوقت...',
+                              controller: _timeCtrl,
+                              validator: (v) =>
+                                  v == null || v.isEmpty ? 'وقت الحجز مطلوب' : null,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 16),
                   const Text(
@@ -665,7 +869,7 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
                       Expanded(
                         child: _FormField(
                           label: 'موقع التصوير (اختياري)',
-                          hint: 'قاعة الأوركيد، طريق الملك عبدالله',
+                          hint: 'مثلاً: قاعة الأوركيد',
                           controller: _venueCtrl,
                         ),
                       ),
@@ -697,6 +901,13 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
                           label: 'السعر الإجمالي',
                           controller: _totalCtrl,
                           onChanged: (_) => setState(() {}),
+                          validator: (v) {
+                            if (v == null || v.trim().isEmpty) return 'السعر الإجمالي مطلوب';
+                            final val = double.tryParse(v.trim());
+                            if (val == null) return 'يجب إدخال أرقام فقط';
+                            if (val < 0) return 'يجب أن يكون السعر أكبر من أو يساوي صفر';
+                            return null;
+                          },
                         ),
                       ),
                       const SizedBox(width: 16),
@@ -705,6 +916,17 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
                           label: 'المبلغ المدفوع',
                           controller: _paidCtrl,
                           onChanged: (_) => setState(() {}),
+                          validator: (v) {
+                            if (v == null || v.trim().isEmpty) return null;
+                            final val = double.tryParse(v.trim());
+                            if (val == null) return 'يجب إدخال أرقام فقط';
+                            if (val < 0) return 'يجب أن يكون المبلغ أكبر من أو يساوي صفر';
+                            final total = double.tryParse(_totalCtrl.text.trim()) ?? 0;
+                            if (val > total) {
+                              return 'المبلغ المدفوع لا يمكن أن يكون أكبر من السعر الإجمالي';
+                            }
+                            return null;
+                          },
                         ),
                       ),
                       const SizedBox(width: 16),
@@ -735,7 +957,7 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
                               ),
                               const SizedBox(height: 8),
                               Text(
-                                '${_remaining.toStringAsFixed(2)} ر.س',
+                                '${_remaining.toStringAsFixed(2)} ج.م',
                                 style: TextStyle(
                                   fontFamily: 'Cairo',
                                   fontSize: 16,
@@ -792,6 +1014,12 @@ class _CreateBookingScreenState extends ConsumerState<CreateBookingScreen> {
                     hint: 'أي ملاحظات إضافية...',
                     controller: _notesCtrl,
                     maxLines: 3,
+                    validator: (v) {
+                      if (v != null && v.length > 500) {
+                        return 'الملاحظات لا يمكن أن تزيد عن 500 حرف';
+                      }
+                      return null;
+                    },
                   ),
                 ],
               ),
@@ -864,6 +1092,7 @@ class _FormField extends StatelessWidget {
   final String? Function(String?)? validator;
   final TextInputType? keyboardType;
   final int maxLines;
+  final List<TextInputFormatter>? inputFormatters;
 
   const _FormField({
     required this.label,
@@ -872,6 +1101,7 @@ class _FormField extends StatelessWidget {
     this.validator,
     this.keyboardType,
     this.maxLines = 1,
+    this.inputFormatters,
   });
 
   @override
@@ -893,6 +1123,7 @@ class _FormField extends StatelessWidget {
           validator: validator,
           keyboardType: keyboardType,
           maxLines: maxLines,
+          inputFormatters: inputFormatters,
           textAlign: TextAlign.right,
           style: const TextStyle(fontFamily: 'Cairo', fontSize: 14),
           decoration: InputDecoration(
@@ -913,11 +1144,13 @@ class _FinancialField extends StatelessWidget {
   final String label;
   final TextEditingController controller;
   final ValueChanged<String>? onChanged;
+  final String? Function(String?)? validator;
 
   const _FinancialField({
     required this.label,
     required this.controller,
     this.onChanged,
+    this.validator,
   });
 
   @override
@@ -937,6 +1170,10 @@ class _FinancialField extends StatelessWidget {
         TextFormField(
           controller: controller,
           onChanged: onChanged,
+          validator: validator,
+          inputFormatters: [
+            FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+          ],
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           textAlign: TextAlign.left,
           style: const TextStyle(
@@ -944,9 +1181,9 @@ class _FinancialField extends StatelessWidget {
             fontSize: 16,
             fontWeight: FontWeight.w600,
           ),
-          decoration: InputDecoration(
-            prefixText: 'ر.س  ',
-            prefixStyle: const TextStyle(
+          decoration: const InputDecoration(
+            prefixText: 'ج.م  ',
+            prefixStyle: TextStyle(
               fontFamily: 'Cairo',
               fontSize: 13,
               color: AppColors.textSecondary,

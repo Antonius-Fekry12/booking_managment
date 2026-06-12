@@ -1,48 +1,44 @@
 // lib/features/settings/presentation/settings_screen.dart
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../app/theme/app_colors.dart';
-import '../../../core/providers/database_provider.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import '../bloc/settings_bloc.dart';
 
-class SettingsScreen extends ConsumerStatefulWidget {
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
   @override
-  ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
+  State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState extends ConsumerState<SettingsScreen> {
+class _SettingsScreenState extends State<SettingsScreen> {
   final _studioNameCtrl = TextEditingController();
   bool _allowDuplicateBookings = false;
-  String _currency = 'ر.س';
+  String _currency = 'ج.م';
   bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    _loadSettings();
+    // BLoC triggers LoadSettings on create; no manual _loadSettings call needed.
   }
 
-  Future<void> _loadSettings() async {
-    final db = ref.read(databaseProvider);
-    final studioName = await db.getSetting('studio_name');
-    final allowDup = await db.getSetting('allow_duplicate_bookings');
-    final currency = await db.getSetting('currency');
-
-    setState(() {
-      _studioNameCtrl.text = studioName ?? 'ستوديو التصوير';
-      _allowDuplicateBookings = allowDup == 'true';
-      _currency = currency ?? 'ر.س';
+  // Settings are loaded via BLoC – no manual load needed.
+  void _syncFromState(SettingsState state) {
+    if (_isLoading) {
+      _studioNameCtrl.text = state.studioName;
+      _allowDuplicateBookings = state.allowDuplicateBookings;
+      _currency = state.currency;
       _isLoading = false;
-    });
+    }
   }
 
-  Future<void> _saveSettings() async {
-    final db = ref.read(databaseProvider);
-    await db.setSetting('studio_name', _studioNameCtrl.text);
-    await db.setSetting(
-        'allow_duplicate_bookings', _allowDuplicateBookings.toString());
-    await db.setSetting('currency', _currency);
+  Future<void> _saveSettings(BuildContext context) async {
+    context.read<SettingsBloc>().add(SaveSettings(
+      studioName: _studioNameCtrl.text,
+      allowDuplicateBookings: _allowDuplicateBookings,
+      currency: _currency,
+    ));
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -63,120 +59,146 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      body: Column(
-        children: [
-          _buildHeader(context),
-          if (_isLoading)
-            const Expanded(
-                child: Center(child: CircularProgressIndicator()))
-          else
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildSection(
-                      title: 'إعدادات الستوديو',
-                      icon: Icons.business_rounded,
+    return BlocProvider(
+      create: (_) => SettingsBloc()..add(LoadSettings()),
+      child: Scaffold(
+        backgroundColor: AppColors.background,
+        body: BlocConsumer<SettingsBloc, SettingsState>(
+          listener: (context, state) {},
+          builder: (context, state) {
+            if (state.status == SettingsStatus.initial ||
+                state.status == SettingsStatus.loading) {
+              return Column(
+                children: [
+                  _buildHeader(context),
+                  const Expanded(
+                      child: Center(child: CircularProgressIndicator())),
+                ],
+              );
+            }
+            if (_isLoading) _syncFromState(state);
+            return Column(
+              children: [
+                _buildHeader(context),
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _SettingRow(
-                          label: 'اسم الستوديو',
-                          description: 'الاسم الذي سيظهر في الفواتير والتقارير',
-                          child: SizedBox(
-                            width: 280,
-                            child: TextFormField(
-                              controller: _studioNameCtrl,
-                              textAlign: TextAlign.right,
-                              style: const TextStyle(fontFamily: 'Cairo'),
-                              decoration: const InputDecoration(
-                                contentPadding: EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 10),
+                        _buildSection(
+                          title: 'إعدادات الستوديو',
+                          icon: Icons.business_rounded,
+                          children: [
+                            _SettingRow(
+                              label: 'اسم الستوديو',
+                              description: 'الاسم الذي سيظهر في الفواتير والتقارير',
+                              child: SizedBox(
+                                width: 280,
+                                child: TextFormField(
+                                  controller: _studioNameCtrl,
+                                  textAlign: TextAlign.right,
+                                  style: const TextStyle(fontFamily: 'Cairo'),
+                                  decoration: const InputDecoration(
+                                    contentPadding: EdgeInsets.symmetric(
+                                        horizontal: 12, vertical: 10),
+                                  ),
+                                ),
                               ),
                             ),
-                          ),
+                            const Divider(height: 24),
+                            _SettingRow(
+                              label: 'رمز العملة',
+                              description: 'رمز العملة المستخدم في الفواتير',
+                              child: DropdownButton<String>(
+                                value: _currency,
+                                items: const [
+                                  DropdownMenuItem(
+                                      value: 'ج.م',
+                                      child: Text('جنيه مصري (ج.م)')),
+                                  DropdownMenuItem(
+                                      value: 'USD',
+                                      child: Text('دولار أمريكي (\$)')),
+                                  DropdownMenuItem(
+                                      value: 'AED',
+                                      child: Text('درهم إماراتي (د.إ)')),
+                                ],
+                                onChanged: (v) {
+                                  if (v != null) setState(() => _currency = v);
+                                },
+                                style: const TextStyle(
+                                    fontFamily: 'Cairo',
+                                    color: AppColors.textPrimary),
+                              ),
+                            ),
+                          ],
                         ),
-                        const Divider(height: 24),
-                        _SettingRow(
-                          label: 'رمز العملة',
-                          description: 'رمز العملة المستخدم في الفواتير',
-                          child: DropdownButton<String>(
-                            value: _currency,
-                            items: const [
-                              DropdownMenuItem(value: 'ر.س', child: Text('ريال سعودي (ر.س)')),
-                              DropdownMenuItem(value: 'USD', child: Text('دولار أمريكي (\$)')),
-                              DropdownMenuItem(value: 'AED', child: Text('درهم إماراتي (د.إ)')),
-                            ],
-                            onChanged: (v) {
-                              if (v != null) setState(() => _currency = v);
-                            },
-                            style: const TextStyle(
-                                fontFamily: 'Cairo',
-                                color: AppColors.textPrimary),
+                        const SizedBox(height: 20),
+                        _buildSection(
+                          title: 'إعدادات الحجوزات',
+                          icon: Icons.event_note_rounded,
+                          children: [
+                            _SettingRow(
+                              label: 'السماح بحجوزات متعددة في نفس اليوم',
+                              description:
+                                  'عند التفعيل، يمكن إنشاء أكثر من حجز في نفس اليوم',
+                              child: Switch(
+                                value: _allowDuplicateBookings,
+                                onChanged: (v) =>
+                                    setState(() => _allowDuplicateBookings = v),
+                                activeColor: AppColors.primary,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 20),
+                        _buildSection(
+                          title: 'إعدادات الإشعارات',
+                          icon: Icons.notifications_rounded,
+                          children: [
+                            _SettingRow(
+                              label: 'تذكير قبل الحجز بيومين',
+                              description:
+                                  'إرسال إشعار للعميل قبل يومين من موعده',
+                              child: Switch(
+                                value: true,
+                                onChanged: (v) {},
+                                activeColor: AppColors.primary,
+                              ),
+                            ),
+                            const Divider(height: 24),
+                            _SettingRow(
+                              label: 'تذكير قبل الحجز بيوم',
+                              description:
+                                  'إرسال إشعار للعميل قبل يوم من موعده',
+                              child: Switch(
+                                value: true,
+                                onChanged: (v) {},
+                                activeColor: AppColors.primary,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 24),
+                        Builder(
+                          builder: (ctx) => ElevatedButton.icon(
+                            onPressed: () => _saveSettings(ctx),
+                            icon: const Icon(Icons.save_rounded, size: 18),
+                            label: const Text('حفظ الإعدادات'),
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 20),
-                    _buildSection(
-                      title: 'إعدادات الحجوزات',
-                      icon: Icons.event_note_rounded,
-                      children: [
-                        _SettingRow(
-                          label: 'السماح بحجوزات متعددة في نفس اليوم',
-                          description:
-                              'عند التفعيل، يمكن إنشاء أكثر من حجز في نفس اليوم',
-                          child: Switch(
-                            value: _allowDuplicateBookings,
-                            onChanged: (v) =>
-                                setState(() => _allowDuplicateBookings = v),
-                            activeColor: AppColors.primary,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    _buildSection(
-                      title: 'إعدادات الإشعارات',
-                      icon: Icons.notifications_rounded,
-                      children: [
-                        _SettingRow(
-                          label: 'تذكير قبل الحجز بيومين',
-                          description: 'إرسال إشعار للعميل قبل يومين من موعده',
-                          child: Switch(
-                            value: true,
-                            onChanged: (v) {},
-                            activeColor: AppColors.primary,
-                          ),
-                        ),
-                        const Divider(height: 24),
-                        _SettingRow(
-                          label: 'تذكير قبل الحجز بيوم',
-                          description: 'إرسال إشعار للعميل قبل يوم من موعده',
-                          child: Switch(
-                            value: true,
-                            onChanged: (v) {},
-                            activeColor: AppColors.primary,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 24),
-                    ElevatedButton.icon(
-                      onPressed: _saveSettings,
-                      icon: const Icon(Icons.save_rounded, size: 18),
-                      label: const Text('حفظ الإعدادات'),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
-            ),
-        ],
+              ],
+            );
+          },
+        ),
       ),
     );
   }
+
 
   Widget _buildHeader(BuildContext context) {
     return Container(

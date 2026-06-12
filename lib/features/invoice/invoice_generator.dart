@@ -246,7 +246,7 @@ class InvoiceGenerator {
                 decoration: const pw.BoxDecoration(color: lightBg),
                 children: [
                   _tableCell(
-                      '${p.amount.toStringAsFixed(0)} ر.س'),
+                      '${p.amount.toStringAsFixed(0)} ج.م'),
                   _tableCell(AppConstants.getPaymentMethodLabel(
                       p.paymentMethod)),
                   _tableCell(AppFormatters.formatDateShort(
@@ -274,14 +274,14 @@ class InvoiceGenerator {
               child: pw.Column(
                 children: [
                   _summaryRow('الإجمالي',
-                      '${booking.totalAmount.toStringAsFixed(0)} ر.س'),
+                      '${booking.totalAmount.toStringAsFixed(0)} ج.م'),
                   pw.Divider(color: borderColor),
                   _summaryRow('المدفوع',
-                      '${booking.paidAmount.toStringAsFixed(0)} ر.س',
+                      '${booking.paidAmount.toStringAsFixed(0)} ج.م',
                       valueColor: successColor),
                   pw.Divider(color: borderColor),
                   _summaryRow('المتبقي',
-                      '${booking.remainingAmount.toStringAsFixed(0)} ر.س',
+                      '${booking.remainingAmount.toStringAsFixed(0)} ج.م',
                       valueColor: dangerColor,
                       isBold: true),
                 ],

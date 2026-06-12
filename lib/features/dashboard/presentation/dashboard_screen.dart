@@ -1,80 +1,78 @@
 // lib/features/dashboard/presentation/dashboard_screen.dart
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import '../../../app/router/app_router.dart';
 import '../../../app/theme/app_colors.dart';
-import '../../../core/providers/database_provider.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../database/app_database.dart';
-
-// ── Providers ────────────────────────────────────────────────────────────────
-final dashboardStatsProvider = FutureProvider<Map<String, dynamic>>((ref) {
-  final db = ref.watch(databaseProvider);
-  return db.getDashboardStats();
-});
-
-final upcomingBookingsProvider = FutureProvider<List<Booking>>((ref) {
-  final db = ref.watch(databaseProvider);
-  return db.getUpcomingBookings();
-});
-
-// Bookings with remaining payments
-final pendingPaymentsBookingsProvider = FutureProvider<List<Booking>>((ref) {
-  final db = ref.watch(databaseProvider);
-  return db.getAllBookings().then(
-    (all) => all.where((b) => b.remainingAmount > 0).toList()..sort(
-          (a, b) => b.remainingAmount.compareTo(a.remainingAmount),
-        ),
-  );
-});
+import '../bloc/dashboard_bloc.dart';
 
 // ── Screen ────────────────────────────────────────────────────────────────────
-class DashboardScreen extends ConsumerWidget {
+class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildHeader(context, ref),
-              const SizedBox(height: 24),
-              _buildStatCards(context, ref),
-              const SizedBox(height: 24),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(flex: 3, child: _buildUpcomingBookings(context, ref)),
-                  const SizedBox(width: 20),
-                  Expanded(flex: 2, child: _buildPendingPayments(context, ref)),
-                ],
-              ),
-              const SizedBox(height: 20),
-              _buildPromoBanner(context),
-            ],
+  Widget build(BuildContext context) {
+    return BlocProvider(
+      create: (_) => DashboardBloc()..add(LoadDashboardData()),
+      child: Scaffold(
+        backgroundColor: AppColors.background,
+        body: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildHeader(context),
+                const SizedBox(height: 24),
+                _buildStatCards(context),
+                const SizedBox(height: 24),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final isNarrow = constraints.maxWidth < 850;
+                    if (isNarrow) {
+                      return Column(
+                        children: [
+                          _buildUpcomingBookings(context),
+                          const SizedBox(height: 20),
+                          _buildPendingPayments(context),
+                        ],
+                      );
+                    }
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(flex: 3, child: _buildUpcomingBookings(context)),
+                        const SizedBox(width: 20),
+                        Expanded(flex: 2, child: _buildPendingPayments(context)),
+                      ],
+                    );
+                  },
+                ),
+                const SizedBox(height: 20),
+                _buildPromoBanner(context),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildHeader(BuildContext context, WidgetRef ref) {
-    return Row(
-      children: [
-        Expanded(
-          child: Column(
+  Widget _buildHeader(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isNarrow = constraints.maxWidth < 800;
+        if (isNarrow) {
+          return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'أهلاً بك مجدداً، أحمد 👋',
+                'أهلاً بك مجدداً، يسي',
                 style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                       fontWeight: FontWeight.w700,
+                      fontFamily: 'Cairo',
                     ),
               ),
               const SizedBox(height: 4),
@@ -82,70 +80,156 @@ class DashboardScreen extends ConsumerWidget {
                 'لديك 4 جلسات تصوير مقررة لهذا اليوم.',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: AppColors.textSecondary,
+                      fontFamily: 'Cairo',
                     ),
               ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 16),
-        // Search bar
-        Container(
-          width: 280,
-          height: 42,
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: AppColors.border),
-          ),
-          child: Row(
-            children: [
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 12),
-                child: Icon(Icons.search_rounded, color: AppColors.textTertiary, size: 20),
-              ),
-              const Expanded(
-                child: TextField(
-                  textAlign: TextAlign.right,
-                  decoration: InputDecoration(
-                    hintText: 'البحث عن حجز أو عميل...',
-                    border: InputBorder.none,
-                    enabledBorder: InputBorder.none,
-                    focusedBorder: InputBorder.none,
-                    contentPadding: EdgeInsets.zero,
-                    hintStyle: TextStyle(
-                      fontFamily: 'Cairo',
-                      fontSize: 13,
-                      color: AppColors.textTertiary,
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: Container(
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: AppColors.surface,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: AppColors.border),
+                      ),
+                      child: Row(
+                        children: [
+                          const Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 12),
+                            child: Icon(Icons.search_rounded, color: AppColors.textTertiary, size: 20),
+                          ),
+                          Expanded(
+                            child: TextField(
+                              textAlign: TextAlign.right,
+                              onChanged: (v) => context.read<DashboardBloc>().add(UpdateSearchQuery(v)),
+                              decoration: const InputDecoration(
+                                hintText: 'البحث عن حجز أو عميل...',
+                                border: InputBorder.none,
+                                enabledBorder: InputBorder.none,
+                                focusedBorder: InputBorder.none,
+                                contentPadding: EdgeInsets.zero,
+                                hintStyle: TextStyle(
+                                  fontFamily: 'Cairo',
+                                  fontSize: 13,
+                                  color: AppColors.textTertiary,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
+                  const SizedBox(width: 8),
+                  _IconButton(icon: Icons.calendar_today_rounded, onTap: () => context.go(AppRoutes.calendar)),
+                  const SizedBox(width: 8),
+                  _IconButton(icon: Icons.notifications_none_rounded, badge: true, onTap: () {}),
+                  const SizedBox(width: 8),
+                  ElevatedButton.icon(
+                    onPressed: () => context.push(AppRoutes.createBooking),
+                    icon: const Icon(Icons.add_rounded, size: 18),
+                    label: const Text('حجز جديد'),
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    ),
+                  ),
+                ],
               ),
             ],
-          ),
-        ),
-        const SizedBox(width: 12),
-        // Icons
-        _IconButton(icon: Icons.calendar_today_rounded, onTap: () => context.go(AppRoutes.calendar)),
-        const SizedBox(width: 8),
-        _IconButton(icon: Icons.notifications_none_rounded, badge: true, onTap: () {}),
-        const SizedBox(width: 16),
-        // New booking button
-        ElevatedButton.icon(
-          onPressed: () => context.push(AppRoutes.createBooking),
-          icon: const Icon(Icons.add_rounded, size: 18),
-          label: const Text('ابدأ حجزاً جديداً'),
-        ),
-      ],
+          );
+        }
+        return Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'أهلاً بك مجدداً، انطونيوس 👋',
+                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          fontFamily: 'Cairo',
+                        ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'لديك 4 جلسات تصوير مقررة لهذا اليوم.',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: AppColors.textSecondary,
+                          fontFamily: 'Cairo',
+                        ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 16),
+            // Search bar
+            Container(
+              width: 280,
+              height: 42,
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Row(
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 12),
+                    child: Icon(Icons.search_rounded, color: AppColors.textTertiary, size: 20),
+                  ),
+                  Expanded(
+                    child: TextField(
+                      textAlign: TextAlign.right,
+                      onChanged: (v) => context.read<DashboardBloc>().add(UpdateSearchQuery(v)),
+                      decoration: const InputDecoration(
+                        hintText: 'البحث عن حجز أو عميل...',
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        contentPadding: EdgeInsets.zero,
+                        hintStyle: TextStyle(
+                          fontFamily: 'Cairo',
+                          fontSize: 13,
+                          color: AppColors.textTertiary,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            // Icons
+            _IconButton(icon: Icons.calendar_today_rounded, onTap: () => context.go(AppRoutes.calendar)),
+            const SizedBox(width: 8),
+            _IconButton(icon: Icons.notifications_none_rounded, badge: true, onTap: () {}),
+            const SizedBox(width: 16),
+            // New booking button
+            ElevatedButton.icon(
+              onPressed: () => context.push(AppRoutes.createBooking),
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('ابدأ حجزاً جديداً'),
+            ),
+          ],
+        );
+      },
     );
   }
 
-  Widget _buildStatCards(BuildContext context, WidgetRef ref) {
-    final statsAsync = ref.watch(dashboardStatsProvider);
-
-    return statsAsync.when(
-      loading: () => const _StatCardsLoading(),
-      error: (e, _) => Text('خطأ: $e'),
-      data: (stats) {
+  Widget _buildStatCards(BuildContext context) {
+    return BlocBuilder<DashboardBloc, DashboardState>(
+      builder: (context, state) {
+        if (state.status == DashboardStatus.loading || state.status == DashboardStatus.initial) {
+          return const _StatCardsLoading();
+        }
+        if (state.status == DashboardStatus.failure) {
+          return Text('خطأ: ${state.errorMessage}');
+        }
+        
+        final stats = state.stats;
         return Row(
           children: [
             Expanded(
@@ -184,16 +268,136 @@ class DashboardScreen extends ConsumerWidget {
                 isLarge: true,
               ),
             ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: _StatCard(
+                label: 'حجوزات ملغاة',
+                value: (stats['cancelledBookings'] ?? 0).toString(),
+                icon: Icons.cancel_rounded,
+                iconColor: AppColors.danger,
+                iconBg: AppColors.dangerLight,
+                tag: 'إجمالي',
+              ),
+            ),
           ],
         );
       },
     );
   }
 
-  Widget _buildUpcomingBookings(BuildContext context, WidgetRef ref) {
-    final bookingsAsync = ref.watch(upcomingBookingsProvider);
-    final db = ref.watch(databaseProvider);
+  Widget _buildUpcomingBookings(BuildContext context) {
+    return BlocBuilder<DashboardBloc, DashboardState>(
+      buildWhen: (previous, current) =>
+          previous.status != current.status ||
+          previous.upcomingBookings != current.upcomingBookings ||
+          previous.customers != current.customers ||
+          previous.searchQuery != current.searchQuery ||
+          previous.sortColumn != current.sortColumn ||
+          previous.sortAscending != current.sortAscending,
+      builder: (context, state) {
+        if (state.status == DashboardStatus.loading || state.status == DashboardStatus.initial) {
+          return Container(
+            height: 300,
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: const Center(child: CircularProgressIndicator()),
+          );
+        }
+        if (state.status == DashboardStatus.failure) {
+          return Container(
+            height: 100,
+            padding: const EdgeInsets.all(20),
+            child: Center(child: Text('خطأ: ${state.errorMessage}')),
+          );
+        }
 
+        final bookings = state.filteredUpcomingBookings;
+
+        return Container(
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        'الحجوزات القادمة',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              fontFamily: 'Cairo',
+                            ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const Spacer(),
+                    TextButton(
+                      onPressed: () => context.go(AppRoutes.bookings),
+                      child: const Text('عرض الكل'),
+                    ),
+                  ],
+                ),
+              ),
+              // Table header
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                decoration: const BoxDecoration(
+                  border: Border(
+                    top: BorderSide(color: AppColors.border),
+                    bottom: BorderSide(color: AppColors.border),
+                  ),
+                  color: AppColors.surfaceVariant,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(flex: 3, child: _SortableHeader('اسم العميل', 'customerName', state)),
+                    Expanded(flex: 2, child: _SortableHeader('التاريخ والوقت', 'date', state)),
+                    Expanded(flex: 2, child: _SortableHeader('نوع الجلسة', 'eventType', state)),
+                    Expanded(flex: 2, child: _SortableHeader('المبلغ', 'amount', state)),
+                    Expanded(flex: 2, child: _SortableHeader('الحالة', 'status', state)),
+                  ],
+                ),
+              ),
+              if (bookings.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.all(40),
+                  child: Center(
+                    child: Text(
+                      state.searchQuery.isNotEmpty ? 'لا توجد نتائج مطابقة' : 'لا توجد حجوزات قادمة',
+                      style: const TextStyle(
+                        color: AppColors.textSecondary,
+                        fontFamily: 'Cairo',
+                      ),
+                    ),
+                  ),
+                )
+              else
+                Column(
+                  children: bookings.take(6).map((booking) {
+                    final customer = state.customers[booking.customerId];
+                    return _BookingRow(
+                      booking: booking,
+                      customer: customer,
+                      onTap: () => context.push('/bookings/${booking.id}'),
+                    );
+                  }).toList(),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildPendingPayments(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
         color: AppColors.surface,
@@ -207,150 +411,117 @@ class DashboardScreen extends ConsumerWidget {
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
             child: Row(
               children: [
-                Text(
-                  'الحجوزات القادمة',
-                  style: Theme.of(context).textTheme.titleLarge,
+                Flexible(
+                  child: Text(
+                    'دفعات معلقة',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontFamily: 'Cairo',
+                        ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                BlocBuilder<DashboardBloc, DashboardState>(
+                  buildWhen: (previous, current) =>
+                      previous.pendingBookings != current.pendingBookings ||
+                      previous.pendingSortCriteria != current.pendingSortCriteria,
+                  builder: (context, state) {
+                    final list = state.sortedPendingBookings;
+                    if (list.isEmpty) return const SizedBox.shrink();
+                    return Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppColors.dangerLight,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        '${list.length} عملاء',
+                        style: const TextStyle(
+                          fontFamily: 'Cairo',
+                          fontSize: 12,
+                          color: AppColors.danger,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    );
+                  },
                 ),
                 const Spacer(),
-                TextButton(
-                  onPressed: () => context.go(AppRoutes.bookings),
-                  child: const Text('عرض الكل'),
+                BlocBuilder<DashboardBloc, DashboardState>(
+                  buildWhen: (previous, current) =>
+                      previous.pendingSortCriteria != current.pendingSortCriteria,
+                  builder: (context, state) {
+                    return PopupMenuButton<String>(
+                      icon: const Icon(Icons.sort_rounded, color: AppColors.textSecondary, size: 20),
+                      tooltip: 'ترتيب حسب',
+                      onSelected: (value) {
+                        context.read<DashboardBloc>().add(UpdatePendingSort(value));
+                      },
+                      itemBuilder: (context) => [
+                        const PopupMenuItem(
+                          value: 'amount',
+                          child: Text('المبلغ المتبقي', style: TextStyle(fontFamily: 'Cairo', fontSize: 13)),
+                        ),
+                        const PopupMenuItem(
+                          value: 'date',
+                          child: Text('تاريخ الحجز', style: TextStyle(fontFamily: 'Cairo', fontSize: 13)),
+                        ),
+                        const PopupMenuItem(
+                          value: 'customerName',
+                          child: Text('اسم العميل', style: TextStyle(fontFamily: 'Cairo', fontSize: 13)),
+                        ),
+                      ],
+                    );
+                  },
                 ),
               ],
             ),
           ),
-          // Table header
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-            decoration: const BoxDecoration(
-              border: Border(
-                top: BorderSide(color: AppColors.border),
-                bottom: BorderSide(color: AppColors.border),
-              ),
-              color: AppColors.surfaceVariant,
-            ),
-            child: const Row(
-              children: [
-                Expanded(flex: 3, child: _TableHeader('اسم العميل')),
-                Expanded(flex: 2, child: _TableHeader('التاريخ والوقت')),
-                Expanded(flex: 2, child: _TableHeader('نوع الجلسة')),
-                Expanded(flex: 2, child: _TableHeader('المبلغ')),
-                Expanded(flex: 2, child: _TableHeader('الحالة')),
-              ],
-            ),
-          ),
-          bookingsAsync.when(
-            loading: () => const Padding(
-              padding: EdgeInsets.all(40),
-              child: Center(child: CircularProgressIndicator()),
-            ),
-            error: (e, _) => Padding(
-              padding: const EdgeInsets.all(20),
-              child: Text('خطأ: $e'),
-            ),
-            data: (bookings) {
-              if (bookings.isEmpty) {
+          const Divider(height: 1),
+          BlocBuilder<DashboardBloc, DashboardState>(
+            buildWhen: (previous, current) =>
+                previous.status != current.status ||
+                previous.pendingBookings != current.pendingBookings ||
+                previous.customers != current.customers ||
+                previous.pendingSortCriteria != current.pendingSortCriteria,
+            builder: (context, state) {
+              if (state.status == DashboardStatus.loading || state.status == DashboardStatus.initial) {
+                return const Padding(
+                  padding: EdgeInsets.all(40),
+                  child: Center(child: CircularProgressIndicator()),
+                );
+              }
+              if (state.status == DashboardStatus.failure) {
+                return Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Text('خطأ: ${state.errorMessage}'),
+                );
+              }
+              final list = state.sortedPendingBookings;
+              if (list.isEmpty) {
                 return const Padding(
                   padding: EdgeInsets.all(40),
                   child: Center(
                     child: Text(
-                      'لا توجد حجوزات قادمة',
+                      'لا توجد دفعات معلقة',
                       style: TextStyle(
                         color: AppColors.textSecondary,
                         fontFamily: 'Cairo',
+                        fontSize: 13,
                       ),
                     ),
                   ),
                 );
               }
               return Column(
-                children: bookings.take(6).map((booking) {
-                  return FutureBuilder<Customer?>(
-                    future: db.getCustomerById(booking.customerId),
-                    builder: (context, snapshot) {
-                      final customer = snapshot.data;
-                      return _BookingRow(
-                        booking: booking,
-                        customer: customer,
-                        onTap: () => context.push('/bookings/${booking.id}'),
-                      );
-                    },
-                  );
-                }).toList(),
-              );
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPendingPayments(BuildContext context, WidgetRef ref) {
-    final pending = ref.watch(pendingPaymentsBookingsProvider);
-    final db = ref.watch(databaseProvider);
-
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-            child: Row(
-              children: [
-                Text(
-                  'دفعات معلقة',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(width: 8),
-                pending.whenOrNull(
-                      data: (list) => Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: AppColors.dangerLight,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(
-                          '${list.length} عملاء',
-                          style: const TextStyle(
-                            fontFamily: 'Cairo',
-                            fontSize: 12,
-                            color: AppColors.danger,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ) ??
-                    const SizedBox.shrink(),
-              ],
-            ),
-          ),
-          const Divider(height: 1),
-          pending.when(
-            loading: () => const Padding(
-              padding: EdgeInsets.all(40),
-              child: Center(child: CircularProgressIndicator()),
-            ),
-            error: (e, _) => Text('$e'),
-            data: (list) {
-              return Column(
                 children: list.take(5).map((booking) {
-                  return FutureBuilder<Customer?>(
-                    future: db.getCustomerById(booking.customerId),
-                    builder: (context, snapshot) {
-                      final customer = snapshot.data;
-                      return _PendingPaymentRow(
-                        booking: booking,
-                        customerName: customer?.name ?? '...',
-                        onRemind: () {},
-                        onTap: () => context.push('/bookings/${booking.id}'),
-                      );
-                    },
+                  final customer = state.customers[booking.customerId];
+                  return _PendingPaymentRow(
+                    booking: booking,
+                    customerName: customer?.name ?? '...',
+                    onRemind: () {},
+                    onTap: () => context.push('/bookings/${booking.id}'),
                   );
                 }).toList(),
               );
@@ -620,24 +791,6 @@ class _StatCardsLoading extends StatelessWidget {
   }
 }
 
-class _TableHeader extends StatelessWidget {
-  final String text;
-  const _TableHeader(this.text);
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: const TextStyle(
-        fontFamily: 'Cairo',
-        fontSize: 13,
-        fontWeight: FontWeight.w600,
-        color: AppColors.textSecondary,
-      ),
-    );
-  }
-}
-
 class _BookingRow extends StatelessWidget {
   final Booking booking;
   final Customer? customer;
@@ -741,7 +894,7 @@ class _BookingRow extends StatelessWidget {
             Expanded(
               flex: 2,
               child: Text(
-                '${booking.totalAmount.toStringAsFixed(0)}\nر.س',
+                '${booking.totalAmount.toStringAsFixed(0)}\nج.م',
                 style: const TextStyle(
                   fontFamily: 'Cairo',
                   fontSize: 14,
@@ -865,18 +1018,42 @@ class _PendingPaymentRow extends StatelessWidget {
                       fontWeight: FontWeight.w600,
                     ),
                   ),
+                  const SizedBox(height: 2),
                   Text(
-                    'ر.س ${booking.remainingAmount.toStringAsFixed(0)}',
+                    'تاريخ الحجز: ${AppFormatters.formatDateShort(booking.bookingDate)}',
                     style: const TextStyle(
                       fontFamily: 'Cairo',
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.danger,
+                      fontSize: 11,
+                      color: AppColors.textTertiary,
                     ),
                   ),
                 ],
               ),
             ),
+            const SizedBox(width: 10),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  '${booking.remainingAmount.toStringAsFixed(0)} ج.م',
+                  style: const TextStyle(
+                    fontFamily: 'Cairo',
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.danger,
+                  ),
+                ),
+                const Text(
+                  'متبقي',
+                  style: TextStyle(
+                    fontFamily: 'Cairo',
+                    fontSize: 10,
+                    color: AppColors.textTertiary,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(width: 12),
             TextButton.icon(
               onPressed: onRemind,
               icon: const Icon(Icons.mail_outline_rounded, size: 14),
@@ -891,6 +1068,46 @@ class _PendingPaymentRow extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _SortableHeader extends StatelessWidget {
+  final String label;
+  final String column;
+  final DashboardState state;
+
+  const _SortableHeader(this.label, this.column, this.state);
+
+  @override
+  Widget build(BuildContext context) {
+    final isSelected = state.sortColumn == column;
+    final arrow = isSelected ? (state.sortAscending ? ' ↑' : ' ↓') : '';
+    return InkWell(
+      onTap: () => context.read<DashboardBloc>().add(UpdateSorting(column)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontFamily: 'Cairo',
+              fontSize: 13,
+              fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+              color: isSelected ? AppColors.primary : AppColors.textSecondary,
+            ),
+          ),
+          Text(
+            arrow,
+            style: const TextStyle(
+              fontFamily: 'Cairo',
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+              color: AppColors.primary,
+            ),
+          ),
+        ],
       ),
     );
   }

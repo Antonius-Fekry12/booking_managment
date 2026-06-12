@@ -4,12 +4,12 @@ import 'package:intl/intl.dart';
 class AppFormatters {
   AppFormatters._();
 
-  static String formatCurrency(double amount, {String symbol = 'ر.س'}) {
+  static String formatCurrency(double amount, {String symbol = 'ج.م'}) {
     final formatted = NumberFormat('#,##0.00', 'ar').format(amount);
     return '$formatted $symbol';
   }
 
-  static String formatCurrencyCompact(double amount, {String symbol = 'ر.س'}) {
+  static String formatCurrencyCompact(double amount, {String symbol = 'ج.م'}) {
     final formatted = NumberFormat('#,##0', 'ar').format(amount);
     return '$formatted\n$symbol';
   }

@@ -23,6 +23,12 @@ class BookingsTable extends Table {
       text().withDefault(const Constant('pending'))(); // confirmed/pending/cancelled
   BoolColumn get isDeleted =>
       boolean().withDefault(const Constant(false))();
+  // Cancellation fields
+  BoolColumn get isCancelled =>
+      boolean().withDefault(const Constant(false))();
+  TextColumn get cancellationReason => text().nullable()();
+  DateTimeColumn get cancelledAt => dateTime().nullable()();
+  TextColumn get cancelledBy => text().nullable()();
   TextColumn get notes => text().nullable()();
   DateTimeColumn get createdAt =>
       dateTime().withDefault(currentDateAndTime)();

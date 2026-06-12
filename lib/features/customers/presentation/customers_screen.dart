@@ -1,26 +1,20 @@
 // lib/features/customers/presentation/customers_screen.dart
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../app/theme/app_colors.dart';
-import '../../../core/providers/database_provider.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../database/app_database.dart';
 import 'package:drift/drift.dart' hide Column;
+import '../bloc/customers_bloc.dart';
 
-final customersListProvider = FutureProvider<List<Customer>>((ref) {
-  final db = ref.watch(databaseProvider);
-  return db.getAllCustomers();
-});
-
-class CustomersScreen extends ConsumerStatefulWidget {
+class CustomersScreen extends StatefulWidget {
   const CustomersScreen({super.key});
 
   @override
-  ConsumerState<CustomersScreen> createState() => _CustomersScreenState();
+  State<CustomersScreen> createState() => _CustomersScreenState();
 }
 
-class _CustomersScreenState extends ConsumerState<CustomersScreen> {
-  String _search = '';
+class _CustomersScreenState extends State<CustomersScreen> {
   bool _showAddForm = false;
   final _nameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
@@ -36,15 +30,12 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
 
   Future<void> _addCustomer() async {
     if (_nameCtrl.text.isEmpty || _phoneCtrl.text.isEmpty) return;
-    final db = ref.read(databaseProvider);
-    await db.insertCustomer(
-      CustomersTableCompanion.insert(
-        name: _nameCtrl.text.trim(),
-        phone: _phoneCtrl.text.trim(),
-        social: Value(_socialCtrl.text.isEmpty ? null : _socialCtrl.text.trim()),
-      ),
+    final customer = CustomersTableCompanion.insert(
+      name: _nameCtrl.text.trim(),
+      phone: _phoneCtrl.text.trim(),
+      social: Value(_socialCtrl.text.isEmpty ? null : _socialCtrl.text.trim()),
     );
-    ref.invalidate(customersListProvider);
+    context.read<CustomersBloc>().add(AddCustomerEvent(customer));
     setState(() {
       _showAddForm = false;
       _nameCtrl.clear();
@@ -55,30 +46,37 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final customersAsync = ref.watch(customersListProvider);
-
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      body: Column(
-        children: [
-          _buildHeader(context),
-          if (_showAddForm) _buildAddForm(),
-          Expanded(
-            child: customersAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Center(child: Text('$e')),
-              data: (customers) {
-                final filtered = customers
-                    .where((c) =>
-                        _search.isEmpty ||
-                        c.name.contains(_search) ||
-                        c.phone.contains(_search))
-                    .toList();
-                return _buildList(context, filtered);
-              },
-            ),
-          ),
-        ],
+    return BlocProvider(
+      create: (_) => CustomersBloc()..add(LoadCustomers()),
+      child: Scaffold(
+        backgroundColor: AppColors.background,
+        body: BlocBuilder<CustomersBloc, CustomersState>(
+          builder: (context, state) {
+            return Column(
+              children: [
+                _buildHeader(context),
+                if (_showAddForm) _buildAddForm(),
+                Expanded(
+                  child: state.status == CustomersStatus.loading || state.status == CustomersStatus.initial
+                      ? const Center(child: CircularProgressIndicator())
+                      : state.status == CustomersStatus.failure
+                          ? Center(child: Text('${state.errorMessage}'))
+                          : Builder(
+                              builder: (context) {
+                                final filtered = state.customers
+                                    .where((c) =>
+                                        state.searchQuery.isEmpty ||
+                                        c.name.contains(state.searchQuery) ||
+                                        c.phone.contains(state.searchQuery))
+                                    .toList();
+                                return _buildList(context, filtered);
+                              },
+                            ),
+                ),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
@@ -111,7 +109,7 @@ class _CustomersScreenState extends ConsumerState<CustomersScreen> {
                 ),
                 Expanded(
                   child: TextField(
-                    onChanged: (v) => setState(() => _search = v),
+                    onChanged: (v) => context.read<CustomersBloc>().add(SearchCustomersEvent(v)),
                     decoration: const InputDecoration(
                       hintText: 'بحث في العملاء...',
                       border: InputBorder.none,

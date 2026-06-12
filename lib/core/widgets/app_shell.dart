@@ -164,7 +164,7 @@ class AppSidebar extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'أحمد كمال',
+                        'يسي',
                         style: TextStyle(
                           fontFamily: 'Cairo',
                           fontSize: 13,
@@ -173,7 +173,7 @@ class AppSidebar extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        'ahmed.k@studio.com',
+                        'yassa@studio.com',
                         style: TextStyle(
                           fontFamily: 'Cairo',
                           fontSize: 11,
@@ -231,16 +231,19 @@ class _NavItem extends StatelessWidget {
                   color: isActive ? AppColors.primary : AppColors.textSecondary,
                 ),
                 const SizedBox(width: 12),
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontFamily: 'Cairo',
-                    fontSize: 14,
-                    fontWeight:
-                        isActive ? FontWeight.w600 : FontWeight.w400,
-                    color: isActive
-                        ? AppColors.primary
-                        : AppColors.textSecondary,
+                Flexible(
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      fontFamily: 'Cairo',
+                      fontSize: 14,
+                      fontWeight:
+                          isActive ? FontWeight.w600 : FontWeight.w400,
+                      color: isActive
+                          ? AppColors.primary
+                          : AppColors.textSecondary,
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
                 if (isActive) ...[

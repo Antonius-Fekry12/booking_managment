@@ -1,33 +1,23 @@
 // lib/features/bookings/presentation/bookings_screen.dart
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import '../../../app/theme/app_colors.dart';
 import '../../../app/router/app_router.dart';
-import '../../../core/providers/database_provider.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../database/app_database.dart';
+import '../bloc/bookings_bloc.dart';
 
-final allBookingsProvider = StreamProvider<List<Booking>>((ref) {
-  final db = ref.watch(databaseProvider);
-  return db.watchAllBookings();
-});
-
-class BookingsScreen extends ConsumerStatefulWidget {
+class BookingsScreen extends StatefulWidget {
   const BookingsScreen({super.key});
 
   @override
-  ConsumerState<BookingsScreen> createState() => _BookingsScreenState();
+  State<BookingsScreen> createState() => _BookingsScreenState();
 }
 
-class _BookingsScreenState extends ConsumerState<BookingsScreen> {
-  String _searchQuery = '';
-  String? _filterStatus;
-
+class _BookingsScreenState extends State<BookingsScreen> {
   @override
   Widget build(BuildContext context) {
-    final bookingsAsync = ref.watch(allBookingsProvider);
-
     return Scaffold(
       backgroundColor: AppColors.background,
       body: Column(
@@ -35,16 +25,28 @@ class _BookingsScreenState extends ConsumerState<BookingsScreen> {
         children: [
           _buildHeader(context),
           Expanded(
-            child: bookingsAsync.when(
-              loading: () =>
-                  const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Center(child: Text('خطأ: $e')),
-              data: (bookings) {
-                final filtered = _applyFilters(bookings);
+            child: BlocBuilder<BookingsBloc, BookingsState>(
+              buildWhen: (previous, current) =>
+                  previous.status != current.status ||
+                  previous.bookings != current.bookings ||
+                  previous.customers != current.customers ||
+                  previous.searchQuery != current.searchQuery ||
+                  previous.filterStatus != current.filterStatus ||
+                  previous.sortColumn != current.sortColumn ||
+                  previous.sortAscending != current.sortAscending ||
+                  previous.currentPage != current.currentPage,
+              builder: (context, state) {
+                if (state.status == BookingsStatus.loading || state.status == BookingsStatus.initial) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (state.status == BookingsStatus.failure) {
+                  return Center(child: Text('خطأ: ${state.errorMessage}'));
+                }
+
                 return Column(
                   children: [
-                    _buildFilters(),
-                    Expanded(child: _buildTable(context, filtered)),
+                    _buildFilters(context, state),
+                    Expanded(child: _buildTable(context, state)),
                   ],
                 );
               },
@@ -53,19 +55,6 @@ class _BookingsScreenState extends ConsumerState<BookingsScreen> {
         ],
       ),
     );
-  }
-
-  List<Booking> _applyFilters(List<Booking> all) {
-    return all.where((b) {
-      final matchStatus =
-          _filterStatus == null || b.status == _filterStatus;
-      final matchSearch = _searchQuery.isEmpty ||
-          b.bookingNumber
-              .toLowerCase()
-              .contains(_searchQuery.toLowerCase());
-      return matchStatus && matchSearch;
-    }).toList()
-      ..sort((a, b) => b.bookingDate.compareTo(a.bookingDate));
   }
 
   Widget _buildHeader(BuildContext context) {
@@ -99,7 +88,7 @@ class _BookingsScreenState extends ConsumerState<BookingsScreen> {
                 Expanded(
                   child: TextField(
                     onChanged: (v) =>
-                        setState(() => _searchQuery = v),
+                        context.read<BookingsBloc>().add(UpdateSearchQuery(v)),
                     decoration: const InputDecoration(
                       hintText: 'بحث في الحجوزات...',
                       border: InputBorder.none,
@@ -127,7 +116,8 @@ class _BookingsScreenState extends ConsumerState<BookingsScreen> {
     );
   }
 
-  Widget _buildFilters() {
+  Widget _buildFilters(BuildContext context, BookingsState state) {
+    final filterStatus = state.filterStatus;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
       child: Row(
@@ -140,46 +130,42 @@ class _BookingsScreenState extends ConsumerState<BookingsScreen> {
           const SizedBox(width: 12),
           _FilterChip(
             label: 'الكل',
-            isSelected: _filterStatus == null,
-            onTap: () => setState(() => _filterStatus = null),
+            isSelected: filterStatus == null,
+            onTap: () => context.read<BookingsBloc>().add(const UpdateFilterStatus(null)),
           ),
           const SizedBox(width: 8),
           _FilterChip(
             label: 'مؤكد',
-            isSelected: _filterStatus == 'confirmed',
+            isSelected: filterStatus == 'confirmed',
             color: AppColors.success,
-            onTap: () => setState(() =>
-                _filterStatus = _filterStatus == 'confirmed'
-                    ? null
-                    : 'confirmed'),
+            onTap: () => context.read<BookingsBloc>().add(UpdateFilterStatus(
+                filterStatus == 'confirmed' ? null : 'confirmed')),
           ),
           const SizedBox(width: 8),
           _FilterChip(
             label: 'قيد الانتظار',
-            isSelected: _filterStatus == 'pending',
+            isSelected: filterStatus == 'pending',
             color: AppColors.warning,
-            onTap: () => setState(() =>
-                _filterStatus =
-                    _filterStatus == 'pending' ? null : 'pending'),
+            onTap: () => context.read<BookingsBloc>().add(UpdateFilterStatus(
+                filterStatus == 'pending' ? null : 'pending')),
           ),
           const SizedBox(width: 8),
           _FilterChip(
             label: 'ملغي',
-            isSelected: _filterStatus == 'cancelled',
+            isSelected: filterStatus == 'cancelled',
             color: AppColors.danger,
-            onTap: () => setState(() =>
-                _filterStatus =
-                    _filterStatus == 'cancelled' ? null : 'cancelled'),
+            onTap: () => context.read<BookingsBloc>().add(UpdateFilterStatus(
+                filterStatus == 'cancelled' ? null : 'cancelled')),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildTable(BuildContext context, List<Booking> bookings) {
-    final db = ref.watch(databaseProvider);
+  Widget _buildTable(BuildContext context, BookingsState state) {
+    final bookings = state.paginatedBookings;
 
-    if (bookings.isEmpty) {
+    if (state.filteredBookings.isEmpty) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -187,11 +173,13 @@ class _BookingsScreenState extends ConsumerState<BookingsScreen> {
             Icon(Icons.event_busy_rounded,
                 size: 64, color: AppColors.textTertiary.withOpacity(0.5)),
             const SizedBox(height: 16),
-            const Text('لا توجد حجوزات',
-                style: TextStyle(
-                    fontFamily: 'Cairo',
-                    fontSize: 18,
-                    color: AppColors.textSecondary)),
+            Text(
+              state.searchQuery.isNotEmpty ? 'لا توجد نتائج مطابقة' : 'لا توجد حجوزات',
+              style: const TextStyle(
+                  fontFamily: 'Cairo',
+                  fontSize: 18,
+                  color: AppColors.textSecondary),
+            ),
             const SizedBox(height: 8),
             ElevatedButton(
               onPressed: () => context.push(AppRoutes.createBooking),
@@ -222,16 +210,16 @@ class _BookingsScreenState extends ConsumerState<BookingsScreen> {
               ),
               border: Border(bottom: BorderSide(color: AppColors.border)),
             ),
-            child: const Row(
+            child: Row(
               children: [
-                Expanded(flex: 3, child: _TH('العميل')),
-                Expanded(flex: 2, child: _TH('رقم الحجز')),
-                Expanded(flex: 2, child: _TH('تاريخ المناسبة')),
-                Expanded(flex: 2, child: _TH('نوع المناسبة')),
-                Expanded(flex: 2, child: _TH('الإجمالي')),
-                Expanded(flex: 2, child: _TH('المتبقي')),
-                Expanded(flex: 2, child: _TH('الحالة')),
-                SizedBox(width: 60),
+                Expanded(flex: 3, child: _SortableTableHeader('العميل', 'customerName', state)),
+                Expanded(flex: 2, child: _SortableTableHeader('رقم الحجز', 'bookingNumber', state)),
+                Expanded(flex: 2, child: _SortableTableHeader('تاريخ المناسبة', 'date', state)),
+                Expanded(flex: 2, child: _SortableTableHeader('نوع المناسبة', 'eventType', state)),
+                Expanded(flex: 2, child: _SortableTableHeader('الإجمالي', 'price', state)),
+                Expanded(flex: 2, child: _SortableTableHeader('المتبقي', 'remaining', state)),
+                Expanded(flex: 2, child: _SortableTableHeader('الحالة', 'status', state)),
+                const SizedBox(width: 60),
               ],
             ),
           ),
@@ -242,20 +230,66 @@ class _BookingsScreenState extends ConsumerState<BookingsScreen> {
                   const Divider(height: 1),
               itemBuilder: (context, index) {
                 final booking = bookings[index];
-                return FutureBuilder<Customer?>(
-                  future: db.getCustomerById(booking.customerId),
-                  builder: (ctx, snap) {
-                    final customer = snap.data;
-                    return _BookingTableRow(
-                      booking: booking,
-                      customer: customer,
-                      onTap: () =>
-                          context.push('/bookings/${booking.id}'),
-                    );
-                  },
+                final customer = state.customers[booking.customerId];
+                return _BookingTableRow(
+                  booking: booking,
+                  customer: customer,
+                  onTap: () =>
+                      context.push('/bookings/${booking.id}'),
                 );
               },
             ),
+          ),
+          // Pagination Controls
+          if (state.filteredBookings.length > 20)
+            _buildPaginationControls(context, state),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPaginationControls(BuildContext context, BookingsState state) {
+    final totalPages = state.totalPages;
+    final currentPage = state.currentPage;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 20),
+      decoration: const BoxDecoration(
+        border: Border(top: BorderSide(color: AppColors.border)),
+        color: AppColors.surface,
+        borderRadius: BorderRadius.only(
+          bottomLeft: Radius.circular(16),
+          bottomRight: Radius.circular(16),
+        ),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            'عرض ${(currentPage - 1) * state.pageSize + 1} - ${(currentPage * state.pageSize).clamp(0, state.filteredBookings.length)} من أصل ${state.filteredBookings.length}',
+            style: const TextStyle(fontFamily: 'Cairo', fontSize: 12, color: AppColors.textSecondary),
+          ),
+          Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.arrow_back_ios_rounded, size: 14),
+                onPressed: currentPage > 1
+                    ? () => context.read<BookingsBloc>().add(UpdatePage(currentPage - 1))
+                    : null,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'صفحة $currentPage من $totalPages',
+                style: const TextStyle(fontFamily: 'Cairo', fontSize: 13, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                icon: const Icon(Icons.arrow_forward_ios_rounded, size: 14),
+                onPressed: currentPage < totalPages
+                    ? () => context.read<BookingsBloc>().add(UpdatePage(currentPage + 1))
+                    : null,
+              ),
+            ],
           ),
         ],
       ),
@@ -305,24 +339,6 @@ class _FilterChip extends StatelessWidget {
   }
 }
 
-class _TH extends StatelessWidget {
-  final String text;
-  const _TH(this.text);
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: const TextStyle(
-        fontFamily: 'Cairo',
-        fontSize: 13,
-        fontWeight: FontWeight.w600,
-        color: AppColors.textSecondary,
-      ),
-    );
-  }
-}
-
 class _BookingTableRow extends StatelessWidget {
   final Booking booking;
   final Customer? customer;
@@ -364,11 +380,16 @@ class _BookingTableRow extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 10),
-                  Text(name,
+                  Expanded(
+                    child: Text(
+                      name,
                       style: const TextStyle(
                           fontFamily: 'Cairo',
                           fontSize: 14,
-                          fontWeight: FontWeight.w500)),
+                          fontWeight: FontWeight.w500),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -412,7 +433,7 @@ class _BookingTableRow extends StatelessWidget {
             Expanded(
               flex: 2,
               child: Text(
-                '${booking.totalAmount.toStringAsFixed(0)} ر.س',
+                '${booking.totalAmount.toStringAsFixed(0)} ج.م',
                 style: const TextStyle(
                     fontFamily: 'Cairo',
                     fontSize: 14,
@@ -422,7 +443,7 @@ class _BookingTableRow extends StatelessWidget {
             Expanded(
               flex: 2,
               child: Text(
-                '${booking.remainingAmount.toStringAsFixed(0)} ر.س',
+                '${booking.remainingAmount.toStringAsFixed(0)} ج.م',
                 style: TextStyle(
                   fontFamily: 'Cairo',
                   fontSize: 14,
@@ -489,5 +510,45 @@ class _BookingTableRow extends StatelessWidget {
       default:
         return AppColors.danger;
     }
+  }
+}
+
+class _SortableTableHeader extends StatelessWidget {
+  final String label;
+  final String column;
+  final BookingsState state;
+
+  const _SortableTableHeader(this.label, this.column, this.state);
+
+  @override
+  Widget build(BuildContext context) {
+    final isSelected = state.sortColumn == column;
+    final arrow = isSelected ? (state.sortAscending ? ' ↑' : ' ↓') : '';
+    return InkWell(
+      onTap: () => context.read<BookingsBloc>().add(UpdateSorting(column)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontFamily: 'Cairo',
+              fontSize: 13,
+              fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+              color: isSelected ? AppColors.primary : AppColors.textSecondary,
+            ),
+          ),
+          Text(
+            arrow,
+            style: const TextStyle(
+              fontFamily: 'Cairo',
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+              color: AppColors.primary,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

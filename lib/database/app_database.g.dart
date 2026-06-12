@@ -408,6 +408,34 @@ class $BookingsTableTable extends BookingsTable
       defaultConstraints:
           GeneratedColumn.constraintIsAlways('CHECK ("is_deleted" IN (0, 1))'),
       defaultValue: const Constant(false));
+  static const VerificationMeta _isCancelledMeta =
+      const VerificationMeta('isCancelled');
+  @override
+  late final GeneratedColumn<bool> isCancelled = GeneratedColumn<bool>(
+      'is_cancelled', aliasedName, false,
+      type: DriftSqlType.bool,
+      requiredDuringInsert: false,
+      defaultConstraints: GeneratedColumn.constraintIsAlways(
+          'CHECK ("is_cancelled" IN (0, 1))'),
+      defaultValue: const Constant(false));
+  static const VerificationMeta _cancellationReasonMeta =
+      const VerificationMeta('cancellationReason');
+  @override
+  late final GeneratedColumn<String> cancellationReason =
+      GeneratedColumn<String>('cancellation_reason', aliasedName, true,
+          type: DriftSqlType.string, requiredDuringInsert: false);
+  static const VerificationMeta _cancelledAtMeta =
+      const VerificationMeta('cancelledAt');
+  @override
+  late final GeneratedColumn<DateTime> cancelledAt = GeneratedColumn<DateTime>(
+      'cancelled_at', aliasedName, true,
+      type: DriftSqlType.dateTime, requiredDuringInsert: false);
+  static const VerificationMeta _cancelledByMeta =
+      const VerificationMeta('cancelledBy');
+  @override
+  late final GeneratedColumn<String> cancelledBy = GeneratedColumn<String>(
+      'cancelled_by', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
   static const VerificationMeta _notesMeta = const VerificationMeta('notes');
   @override
   late final GeneratedColumn<String> notes = GeneratedColumn<String>(
@@ -445,6 +473,10 @@ class $BookingsTableTable extends BookingsTable
         remainingAmount,
         status,
         isDeleted,
+        isCancelled,
+        cancellationReason,
+        cancelledAt,
+        cancelledBy,
         notes,
         createdAt,
         updatedAt
@@ -534,6 +566,30 @@ class $BookingsTableTable extends BookingsTable
       context.handle(_isDeletedMeta,
           isDeleted.isAcceptableOrUnknown(data['is_deleted']!, _isDeletedMeta));
     }
+    if (data.containsKey('is_cancelled')) {
+      context.handle(
+          _isCancelledMeta,
+          isCancelled.isAcceptableOrUnknown(
+              data['is_cancelled']!, _isCancelledMeta));
+    }
+    if (data.containsKey('cancellation_reason')) {
+      context.handle(
+          _cancellationReasonMeta,
+          cancellationReason.isAcceptableOrUnknown(
+              data['cancellation_reason']!, _cancellationReasonMeta));
+    }
+    if (data.containsKey('cancelled_at')) {
+      context.handle(
+          _cancelledAtMeta,
+          cancelledAt.isAcceptableOrUnknown(
+              data['cancelled_at']!, _cancelledAtMeta));
+    }
+    if (data.containsKey('cancelled_by')) {
+      context.handle(
+          _cancelledByMeta,
+          cancelledBy.isAcceptableOrUnknown(
+              data['cancelled_by']!, _cancelledByMeta));
+    }
     if (data.containsKey('notes')) {
       context.handle(
           _notesMeta, notes.isAcceptableOrUnknown(data['notes']!, _notesMeta));
@@ -583,6 +639,14 @@ class $BookingsTableTable extends BookingsTable
           .read(DriftSqlType.string, data['${effectivePrefix}status'])!,
       isDeleted: attachedDatabase.typeMapping
           .read(DriftSqlType.bool, data['${effectivePrefix}is_deleted'])!,
+      isCancelled: attachedDatabase.typeMapping
+          .read(DriftSqlType.bool, data['${effectivePrefix}is_cancelled'])!,
+      cancellationReason: attachedDatabase.typeMapping.read(
+          DriftSqlType.string, data['${effectivePrefix}cancellation_reason']),
+      cancelledAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}cancelled_at']),
+      cancelledBy: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}cancelled_by']),
       notes: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}notes']),
       createdAt: attachedDatabase.typeMapping
@@ -613,6 +677,10 @@ class Booking extends DataClass implements Insertable<Booking> {
   final double remainingAmount;
   final String status;
   final bool isDeleted;
+  final bool isCancelled;
+  final String? cancellationReason;
+  final DateTime? cancelledAt;
+  final String? cancelledBy;
   final String? notes;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -631,6 +699,10 @@ class Booking extends DataClass implements Insertable<Booking> {
       required this.remainingAmount,
       required this.status,
       required this.isDeleted,
+      required this.isCancelled,
+      this.cancellationReason,
+      this.cancelledAt,
+      this.cancelledBy,
       this.notes,
       required this.createdAt,
       required this.updatedAt});
@@ -659,6 +731,16 @@ class Booking extends DataClass implements Insertable<Booking> {
     map['remaining_amount'] = Variable<double>(remainingAmount);
     map['status'] = Variable<String>(status);
     map['is_deleted'] = Variable<bool>(isDeleted);
+    map['is_cancelled'] = Variable<bool>(isCancelled);
+    if (!nullToAbsent || cancellationReason != null) {
+      map['cancellation_reason'] = Variable<String>(cancellationReason);
+    }
+    if (!nullToAbsent || cancelledAt != null) {
+      map['cancelled_at'] = Variable<DateTime>(cancelledAt);
+    }
+    if (!nullToAbsent || cancelledBy != null) {
+      map['cancelled_by'] = Variable<String>(cancelledBy);
+    }
     if (!nullToAbsent || notes != null) {
       map['notes'] = Variable<String>(notes);
     }
@@ -689,6 +771,16 @@ class Booking extends DataClass implements Insertable<Booking> {
       remainingAmount: Value(remainingAmount),
       status: Value(status),
       isDeleted: Value(isDeleted),
+      isCancelled: Value(isCancelled),
+      cancellationReason: cancellationReason == null && nullToAbsent
+          ? const Value.absent()
+          : Value(cancellationReason),
+      cancelledAt: cancelledAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(cancelledAt),
+      cancelledBy: cancelledBy == null && nullToAbsent
+          ? const Value.absent()
+          : Value(cancelledBy),
       notes:
           notes == null && nullToAbsent ? const Value.absent() : Value(notes),
       createdAt: Value(createdAt),
@@ -714,6 +806,11 @@ class Booking extends DataClass implements Insertable<Booking> {
       remainingAmount: serializer.fromJson<double>(json['remainingAmount']),
       status: serializer.fromJson<String>(json['status']),
       isDeleted: serializer.fromJson<bool>(json['isDeleted']),
+      isCancelled: serializer.fromJson<bool>(json['isCancelled']),
+      cancellationReason:
+          serializer.fromJson<String?>(json['cancellationReason']),
+      cancelledAt: serializer.fromJson<DateTime?>(json['cancelledAt']),
+      cancelledBy: serializer.fromJson<String?>(json['cancelledBy']),
       notes: serializer.fromJson<String?>(json['notes']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
@@ -737,6 +834,10 @@ class Booking extends DataClass implements Insertable<Booking> {
       'remainingAmount': serializer.toJson<double>(remainingAmount),
       'status': serializer.toJson<String>(status),
       'isDeleted': serializer.toJson<bool>(isDeleted),
+      'isCancelled': serializer.toJson<bool>(isCancelled),
+      'cancellationReason': serializer.toJson<String?>(cancellationReason),
+      'cancelledAt': serializer.toJson<DateTime?>(cancelledAt),
+      'cancelledBy': serializer.toJson<String?>(cancelledBy),
       'notes': serializer.toJson<String?>(notes),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
@@ -758,6 +859,10 @@ class Booking extends DataClass implements Insertable<Booking> {
           double? remainingAmount,
           String? status,
           bool? isDeleted,
+          bool? isCancelled,
+          Value<String?> cancellationReason = const Value.absent(),
+          Value<DateTime?> cancelledAt = const Value.absent(),
+          Value<String?> cancelledBy = const Value.absent(),
           Value<String?> notes = const Value.absent(),
           DateTime? createdAt,
           DateTime? updatedAt}) =>
@@ -776,6 +881,12 @@ class Booking extends DataClass implements Insertable<Booking> {
         remainingAmount: remainingAmount ?? this.remainingAmount,
         status: status ?? this.status,
         isDeleted: isDeleted ?? this.isDeleted,
+        isCancelled: isCancelled ?? this.isCancelled,
+        cancellationReason: cancellationReason.present
+            ? cancellationReason.value
+            : this.cancellationReason,
+        cancelledAt: cancelledAt.present ? cancelledAt.value : this.cancelledAt,
+        cancelledBy: cancelledBy.present ? cancelledBy.value : this.cancelledBy,
         notes: notes.present ? notes.value : this.notes,
         createdAt: createdAt ?? this.createdAt,
         updatedAt: updatedAt ?? this.updatedAt,
@@ -804,6 +915,15 @@ class Booking extends DataClass implements Insertable<Booking> {
           : this.remainingAmount,
       status: data.status.present ? data.status.value : this.status,
       isDeleted: data.isDeleted.present ? data.isDeleted.value : this.isDeleted,
+      isCancelled:
+          data.isCancelled.present ? data.isCancelled.value : this.isCancelled,
+      cancellationReason: data.cancellationReason.present
+          ? data.cancellationReason.value
+          : this.cancellationReason,
+      cancelledAt:
+          data.cancelledAt.present ? data.cancelledAt.value : this.cancelledAt,
+      cancelledBy:
+          data.cancelledBy.present ? data.cancelledBy.value : this.cancelledBy,
       notes: data.notes.present ? data.notes.value : this.notes,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
@@ -827,6 +947,10 @@ class Booking extends DataClass implements Insertable<Booking> {
           ..write('remainingAmount: $remainingAmount, ')
           ..write('status: $status, ')
           ..write('isDeleted: $isDeleted, ')
+          ..write('isCancelled: $isCancelled, ')
+          ..write('cancellationReason: $cancellationReason, ')
+          ..write('cancelledAt: $cancelledAt, ')
+          ..write('cancelledBy: $cancelledBy, ')
           ..write('notes: $notes, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
@@ -835,24 +959,29 @@ class Booking extends DataClass implements Insertable<Booking> {
   }
 
   @override
-  int get hashCode => Object.hash(
-      id,
-      bookingNumber,
-      customerId,
-      eventType,
-      bookingDate,
-      venue,
-      timeStart,
-      timeEnd,
-      staff,
-      totalAmount,
-      paidAmount,
-      remainingAmount,
-      status,
-      isDeleted,
-      notes,
-      createdAt,
-      updatedAt);
+  int get hashCode => Object.hashAll([
+        id,
+        bookingNumber,
+        customerId,
+        eventType,
+        bookingDate,
+        venue,
+        timeStart,
+        timeEnd,
+        staff,
+        totalAmount,
+        paidAmount,
+        remainingAmount,
+        status,
+        isDeleted,
+        isCancelled,
+        cancellationReason,
+        cancelledAt,
+        cancelledBy,
+        notes,
+        createdAt,
+        updatedAt
+      ]);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -871,6 +1000,10 @@ class Booking extends DataClass implements Insertable<Booking> {
           other.remainingAmount == this.remainingAmount &&
           other.status == this.status &&
           other.isDeleted == this.isDeleted &&
+          other.isCancelled == this.isCancelled &&
+          other.cancellationReason == this.cancellationReason &&
+          other.cancelledAt == this.cancelledAt &&
+          other.cancelledBy == this.cancelledBy &&
           other.notes == this.notes &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
@@ -891,6 +1024,10 @@ class BookingsTableCompanion extends UpdateCompanion<Booking> {
   final Value<double> remainingAmount;
   final Value<String> status;
   final Value<bool> isDeleted;
+  final Value<bool> isCancelled;
+  final Value<String?> cancellationReason;
+  final Value<DateTime?> cancelledAt;
+  final Value<String?> cancelledBy;
   final Value<String?> notes;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
@@ -909,6 +1046,10 @@ class BookingsTableCompanion extends UpdateCompanion<Booking> {
     this.remainingAmount = const Value.absent(),
     this.status = const Value.absent(),
     this.isDeleted = const Value.absent(),
+    this.isCancelled = const Value.absent(),
+    this.cancellationReason = const Value.absent(),
+    this.cancelledAt = const Value.absent(),
+    this.cancelledBy = const Value.absent(),
     this.notes = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
@@ -928,6 +1069,10 @@ class BookingsTableCompanion extends UpdateCompanion<Booking> {
     this.remainingAmount = const Value.absent(),
     this.status = const Value.absent(),
     this.isDeleted = const Value.absent(),
+    this.isCancelled = const Value.absent(),
+    this.cancellationReason = const Value.absent(),
+    this.cancelledAt = const Value.absent(),
+    this.cancelledBy = const Value.absent(),
     this.notes = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
@@ -950,6 +1095,10 @@ class BookingsTableCompanion extends UpdateCompanion<Booking> {
     Expression<double>? remainingAmount,
     Expression<String>? status,
     Expression<bool>? isDeleted,
+    Expression<bool>? isCancelled,
+    Expression<String>? cancellationReason,
+    Expression<DateTime>? cancelledAt,
+    Expression<String>? cancelledBy,
     Expression<String>? notes,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
@@ -969,6 +1118,10 @@ class BookingsTableCompanion extends UpdateCompanion<Booking> {
       if (remainingAmount != null) 'remaining_amount': remainingAmount,
       if (status != null) 'status': status,
       if (isDeleted != null) 'is_deleted': isDeleted,
+      if (isCancelled != null) 'is_cancelled': isCancelled,
+      if (cancellationReason != null) 'cancellation_reason': cancellationReason,
+      if (cancelledAt != null) 'cancelled_at': cancelledAt,
+      if (cancelledBy != null) 'cancelled_by': cancelledBy,
       if (notes != null) 'notes': notes,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
@@ -990,6 +1143,10 @@ class BookingsTableCompanion extends UpdateCompanion<Booking> {
       Value<double>? remainingAmount,
       Value<String>? status,
       Value<bool>? isDeleted,
+      Value<bool>? isCancelled,
+      Value<String?>? cancellationReason,
+      Value<DateTime?>? cancelledAt,
+      Value<String?>? cancelledBy,
       Value<String?>? notes,
       Value<DateTime>? createdAt,
       Value<DateTime>? updatedAt}) {
@@ -1008,6 +1165,10 @@ class BookingsTableCompanion extends UpdateCompanion<Booking> {
       remainingAmount: remainingAmount ?? this.remainingAmount,
       status: status ?? this.status,
       isDeleted: isDeleted ?? this.isDeleted,
+      isCancelled: isCancelled ?? this.isCancelled,
+      cancellationReason: cancellationReason ?? this.cancellationReason,
+      cancelledAt: cancelledAt ?? this.cancelledAt,
+      cancelledBy: cancelledBy ?? this.cancelledBy,
       notes: notes ?? this.notes,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -1059,6 +1220,18 @@ class BookingsTableCompanion extends UpdateCompanion<Booking> {
     if (isDeleted.present) {
       map['is_deleted'] = Variable<bool>(isDeleted.value);
     }
+    if (isCancelled.present) {
+      map['is_cancelled'] = Variable<bool>(isCancelled.value);
+    }
+    if (cancellationReason.present) {
+      map['cancellation_reason'] = Variable<String>(cancellationReason.value);
+    }
+    if (cancelledAt.present) {
+      map['cancelled_at'] = Variable<DateTime>(cancelledAt.value);
+    }
+    if (cancelledBy.present) {
+      map['cancelled_by'] = Variable<String>(cancelledBy.value);
+    }
     if (notes.present) {
       map['notes'] = Variable<String>(notes.value);
     }
@@ -1088,6 +1261,10 @@ class BookingsTableCompanion extends UpdateCompanion<Booking> {
           ..write('remainingAmount: $remainingAmount, ')
           ..write('status: $status, ')
           ..write('isDeleted: $isDeleted, ')
+          ..write('isCancelled: $isCancelled, ')
+          ..write('cancellationReason: $cancellationReason, ')
+          ..write('cancelledAt: $cancelledAt, ')
+          ..write('cancelledBy: $cancelledBy, ')
           ..write('notes: $notes, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
@@ -2141,6 +2318,10 @@ typedef $$BookingsTableTableCreateCompanionBuilder = BookingsTableCompanion
   Value<double> remainingAmount,
   Value<String> status,
   Value<bool> isDeleted,
+  Value<bool> isCancelled,
+  Value<String?> cancellationReason,
+  Value<DateTime?> cancelledAt,
+  Value<String?> cancelledBy,
   Value<String?> notes,
   Value<DateTime> createdAt,
   Value<DateTime> updatedAt,
@@ -2161,6 +2342,10 @@ typedef $$BookingsTableTableUpdateCompanionBuilder = BookingsTableCompanion
   Value<double> remainingAmount,
   Value<String> status,
   Value<bool> isDeleted,
+  Value<bool> isCancelled,
+  Value<String?> cancellationReason,
+  Value<DateTime?> cancelledAt,
+  Value<String?> cancelledBy,
   Value<String?> notes,
   Value<DateTime> createdAt,
   Value<DateTime> updatedAt,
@@ -2268,6 +2453,19 @@ class $$BookingsTableTableFilterComposer
 
   ColumnFilters<bool> get isDeleted => $composableBuilder(
       column: $table.isDeleted, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<bool> get isCancelled => $composableBuilder(
+      column: $table.isCancelled, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get cancellationReason => $composableBuilder(
+      column: $table.cancellationReason,
+      builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get cancelledAt => $composableBuilder(
+      column: $table.cancelledAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get cancelledBy => $composableBuilder(
+      column: $table.cancelledBy, builder: (column) => ColumnFilters(column));
 
   ColumnFilters<String> get notes => $composableBuilder(
       column: $table.notes, builder: (column) => ColumnFilters(column));
@@ -2392,6 +2590,19 @@ class $$BookingsTableTableOrderingComposer
   ColumnOrderings<bool> get isDeleted => $composableBuilder(
       column: $table.isDeleted, builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<bool> get isCancelled => $composableBuilder(
+      column: $table.isCancelled, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get cancellationReason => $composableBuilder(
+      column: $table.cancellationReason,
+      builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get cancelledAt => $composableBuilder(
+      column: $table.cancelledAt, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get cancelledBy => $composableBuilder(
+      column: $table.cancelledBy, builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<String> get notes => $composableBuilder(
       column: $table.notes, builder: (column) => ColumnOrderings(column));
 
@@ -2469,6 +2680,18 @@ class $$BookingsTableTableAnnotationComposer
 
   GeneratedColumn<bool> get isDeleted =>
       $composableBuilder(column: $table.isDeleted, builder: (column) => column);
+
+  GeneratedColumn<bool> get isCancelled => $composableBuilder(
+      column: $table.isCancelled, builder: (column) => column);
+
+  GeneratedColumn<String> get cancellationReason => $composableBuilder(
+      column: $table.cancellationReason, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get cancelledAt => $composableBuilder(
+      column: $table.cancelledAt, builder: (column) => column);
+
+  GeneratedColumn<String> get cancelledBy => $composableBuilder(
+      column: $table.cancelledBy, builder: (column) => column);
 
   GeneratedColumn<String> get notes =>
       $composableBuilder(column: $table.notes, builder: (column) => column);
@@ -2584,6 +2807,10 @@ class $$BookingsTableTableTableManager extends RootTableManager<
             Value<double> remainingAmount = const Value.absent(),
             Value<String> status = const Value.absent(),
             Value<bool> isDeleted = const Value.absent(),
+            Value<bool> isCancelled = const Value.absent(),
+            Value<String?> cancellationReason = const Value.absent(),
+            Value<DateTime?> cancelledAt = const Value.absent(),
+            Value<String?> cancelledBy = const Value.absent(),
             Value<String?> notes = const Value.absent(),
             Value<DateTime> createdAt = const Value.absent(),
             Value<DateTime> updatedAt = const Value.absent(),
@@ -2603,6 +2830,10 @@ class $$BookingsTableTableTableManager extends RootTableManager<
             remainingAmount: remainingAmount,
             status: status,
             isDeleted: isDeleted,
+            isCancelled: isCancelled,
+            cancellationReason: cancellationReason,
+            cancelledAt: cancelledAt,
+            cancelledBy: cancelledBy,
             notes: notes,
             createdAt: createdAt,
             updatedAt: updatedAt,
@@ -2622,6 +2853,10 @@ class $$BookingsTableTableTableManager extends RootTableManager<
             Value<double> remainingAmount = const Value.absent(),
             Value<String> status = const Value.absent(),
             Value<bool> isDeleted = const Value.absent(),
+            Value<bool> isCancelled = const Value.absent(),
+            Value<String?> cancellationReason = const Value.absent(),
+            Value<DateTime?> cancelledAt = const Value.absent(),
+            Value<String?> cancelledBy = const Value.absent(),
             Value<String?> notes = const Value.absent(),
             Value<DateTime> createdAt = const Value.absent(),
             Value<DateTime> updatedAt = const Value.absent(),
@@ -2641,6 +2876,10 @@ class $$BookingsTableTableTableManager extends RootTableManager<
             remainingAmount: remainingAmount,
             status: status,
             isDeleted: isDeleted,
+            isCancelled: isCancelled,
+            cancellationReason: cancellationReason,
+            cancelledAt: cancelledAt,
+            cancelledBy: cancelledBy,
             notes: notes,
             createdAt: createdAt,
             updatedAt: updatedAt,

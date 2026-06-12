@@ -1,69 +1,199 @@
 // lib/features/calendar/presentation/calendar_screen.dart
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import '../../../app/theme/app_colors.dart';
-import '../../../core/providers/database_provider.dart';
+import '../../../core/di/service_locator.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../database/app_database.dart';
 import '../../../app/router/app_router.dart';
+import '../bloc/calendar_bloc.dart';
 
-final calendarMonthProvider =
-    StateProvider<DateTime>((ref) => DateTime.now());
-
-final monthBookingsProvider =
-    FutureProvider.family<List<Booking>, DateTime>((ref, month) async {
-  final db = ref.watch(databaseProvider);
-  final all = await db.getAllBookings();
-  return all
-      .where((b) =>
-          b.bookingDate.year == month.year &&
-          b.bookingDate.month == month.month)
-      .toList();
-});
-
-class CalendarScreen extends ConsumerStatefulWidget {
+class CalendarScreen extends StatefulWidget {
   const CalendarScreen({super.key});
 
   @override
-  ConsumerState<CalendarScreen> createState() => _CalendarScreenState();
+  State<CalendarScreen> createState() => _CalendarScreenState();
 }
 
-class _CalendarScreenState extends ConsumerState<CalendarScreen> {
+class _CalendarScreenState extends State<CalendarScreen> {
   DateTime? _selectedDay;
   List<Booking> _dayBookings = [];
 
   @override
   Widget build(BuildContext context) {
-    final currentMonth = ref.watch(calendarMonthProvider);
-    final bookingsAsync = ref.watch(monthBookingsProvider(currentMonth));
-
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      body: Row(
-        children: [
-          // Side panel: shown when a day is selected
-          if (_selectedDay != null)
-            _buildSidePanel(context),
-          Expanded(
-            child: Column(
+    return BlocProvider(
+      create: (_) => CalendarBloc()..add(LoadMonthBookings(DateTime.now())),
+      child: Scaffold(
+        backgroundColor: AppColors.background,
+        body: BlocBuilder<CalendarBloc, CalendarState>(
+          builder: (context, state) {
+            final currentMonth = state.currentMonth;
+            return Row(
               children: [
-                _buildHeader(context, currentMonth),
+                // Side panel: shown when a day is selected
+                if (_selectedDay != null)
+                  _buildSidePanel(context),
                 Expanded(
-                  child: bookingsAsync.when(
-                    loading: () =>
-                        const Center(child: CircularProgressIndicator()),
-                    error: (e, _) => Center(child: Text('$e')),
-                    data: (bookings) => _buildCalendar(
-                        context, currentMonth, bookings),
+                  child: Column(
+                    children: [
+                      _buildHeader(context, currentMonth),
+                      Expanded(
+                        child: state.status == CalendarStatus.loading || state.status == CalendarStatus.initial
+                            ? const Center(child: CircularProgressIndicator())
+                            : state.status == CalendarStatus.failure
+                                ? Center(child: Text('${state.errorMessage}'))
+                                : _buildCalendar(context, currentMonth, state.bookings),
+                      ),
+                      _buildLegend(),
+                    ],
                   ),
                 ),
-                _buildLegend(),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  void _showDayBookingsDialog(BuildContext context, DateTime date, List<Booking> bookings) async {
+    final db = sl<AppDatabase>();
+    
+    // Resolve all customers first
+    final customersList = <Customer>[];
+    for (final b in bookings) {
+      final c = await db.getCustomerById(b.customerId);
+      if (c != null) {
+        customersList.add(c);
+      }
+    }
+
+    if (!context.mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return Directionality(
+          textDirection: TextDirection.rtl,
+          child: AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            title: Row(
+              children: [
+                const Icon(Icons.event_note_rounded, color: AppColors.primary),
+                const SizedBox(width: 8),
+                Text(
+                  'حجوزات يوم ${AppFormatters.formatDateShort(date)}',
+                  style: const TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.bold, fontSize: 16),
+                ),
               ],
             ),
+            content: SizedBox(
+              width: 400,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryLighter,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'إجمالي عدد الحجوزات:',
+                          style: TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.w600, fontSize: 14),
+                        ),
+                        Text(
+                          '${bookings.length}',
+                          style: const TextStyle(
+                            fontFamily: 'Cairo',
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                            color: AppColors.primary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'تفاصيل الجلسات:',
+                    style: TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                  const SizedBox(height: 8),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 250),
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: bookings.length,
+                      separatorBuilder: (_, __) => const Divider(height: 16),
+                      itemBuilder: (context, index) {
+                        final booking = bookings[index];
+                        final customer = customersList.firstWhere(
+                          (c) => c.id == booking.customerId,
+                          orElse: () => Customer(id: -1, name: '...', phone: '', createdAt: DateTime.now()),
+                        );
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.person_rounded, size: 16, color: AppColors.textSecondary),
+                                const SizedBox(width: 8),
+                                Text(
+                                  customer.name,
+                                  style: const TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.w600, fontSize: 13),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                const Icon(Icons.access_time_rounded, size: 16, color: AppColors.textSecondary),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'الوقت: ${booking.timeStart ?? '--'}',
+                                  style: const TextStyle(fontFamily: 'Cairo', fontSize: 12, color: AppColors.textSecondary),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                const Icon(Icons.photo_camera_rounded, size: 16, color: AppColors.textSecondary),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'نوع الجلسة: ${AppConstants.getEventLabel(booking.eventType)}',
+                                  style: const TextStyle(fontFamily: 'Cairo', fontSize: 12, color: AppColors.textSecondary),
+                                ),
+                              ],
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text(
+                  'إغلاق',
+                  style: TextStyle(fontFamily: 'Cairo', fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -81,54 +211,22 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
       ),
       child: Row(
         children: [
-          // Search
-          Container(
-            width: 240,
-            height: 40,
-            decoration: BoxDecoration(
-              color: AppColors.surfaceVariant,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: const Row(
-              children: [
-                Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 10),
-                  child: Icon(Icons.search_rounded,
-                      size: 18, color: AppColors.textTertiary),
-                ),
-                Expanded(
-                  child: TextField(
-                    decoration: InputDecoration(
-                      hintText: 'بحث عن حجز أو عميل...',
-                      border: InputBorder.none,
-                      enabledBorder: InputBorder.none,
-                      focusedBorder: InputBorder.none,
-                      contentPadding: EdgeInsets.zero,
-                      hintStyle: TextStyle(
-                          fontFamily: 'Cairo',
-                          fontSize: 13,
-                          color: AppColors.textTertiary),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const Spacer(),
           Text(
             'نظام إدارة الحجوزات',
             style: Theme.of(context).textTheme.headlineSmall,
           ),
+          // Search
+
+          const Spacer(),
+
           const SizedBox(width: 24),
           // Month navigation
           Row(
             children: [
               IconButton(
-                onPressed: () => ref
-                    .read(calendarMonthProvider.notifier)
-                    .state = DateTime(month.year, month.month - 1),
-                icon: const Icon(Icons.chevron_right_rounded),
+                onPressed: () => context.read<CalendarBloc>().add(
+                    ChangeMonthEvent(DateTime(month.year, month.month - 1))),
+                icon: const Icon(Icons.chevron_left_rounded),
               ),
               Text(
                 '${arabicMonths[month.month - 1]} ${month.year}',
@@ -139,10 +237,9 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
                 ),
               ),
               IconButton(
-                onPressed: () => ref
-                    .read(calendarMonthProvider.notifier)
-                    .state = DateTime(month.year, month.month + 1),
-                icon: const Icon(Icons.chevron_left_rounded),
+                onPressed: () => context.read<CalendarBloc>().add(
+                    ChangeMonthEvent(DateTime(month.year, month.month + 1))),
+                icon: const Icon(Icons.chevron_right_rounded),
               ),
             ],
           ),
@@ -243,6 +340,9 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
                         _selectedDay = date;
                         _dayBookings = dayBookings;
                       });
+                      if (dayBookings.isNotEmpty) {
+                        _showDayBookingsDialog(context, date, dayBookings);
+                      }
                     },
                   );
                 },
@@ -255,7 +355,7 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
   }
 
   Widget _buildSidePanel(BuildContext context) {
-    final db = ref.watch(databaseProvider);
+    final db = sl<AppDatabase>();
 
     return Container(
       width: 240,
@@ -343,9 +443,12 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
                         onEdit: () => context.push(
                             '/bookings/${booking.id}'),
                         onCancel: () async {
-                          await db.softDeleteBooking(booking.id);
+                          context.read<CalendarBloc>().add(DeleteCalendarBookingEvent(booking.id));
                           setState(() {
                             _dayBookings.removeAt(i);
+                            if (_dayBookings.isEmpty) {
+                              _selectedDay = null;
+                            }
                           });
                         },
                       );
@@ -414,13 +517,11 @@ class _CalendarScreenState extends ConsumerState<CalendarScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.end,
         children: const [
-          _LegendItem(color: AppColors.calendarAvailable, label: 'متاح'),
+          _LegendItem(color: AppColors.primary, label: 'اليوم المحدد'),
           SizedBox(width: 16),
-          _LegendItem(
-              color: AppColors.calendarBooked, label: 'حجز كامل'),
+          _LegendItem(color: Color(0xFFFEF08A), label: 'يوجد حجز'),
           SizedBox(width: 16),
-          _LegendItem(
-              color: AppColors.calendarPartial, label: 'حجز جزئي'),
+          _LegendItem(color: Color(0xFFF1F5F9), label: 'لا يوجد حجز'),
         ],
       ),
     );
@@ -445,13 +546,13 @@ class _CalendarDayCell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Color? bgColor;
-    if (bookings.isEmpty) {
-      bgColor = null;
-    } else if (bookings.length >= 2) {
-      bgColor = AppColors.calendarBooked;
+    Color bgColor;
+    if (isSelected) {
+      bgColor = AppColors.primaryLighter;
+    } else if (bookings.isNotEmpty) {
+      bgColor = const Color(0xFFFEF08A); // Yellow
     } else {
-      bgColor = AppColors.calendarPartial;
+      bgColor = const Color(0xFFF1F5F9); // Grey
     }
 
     return GestureDetector(
@@ -459,9 +560,7 @@ class _CalendarDayCell extends StatelessWidget {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         decoration: BoxDecoration(
-          color: isSelected
-              ? AppColors.primaryLighter
-              : bgColor ?? Colors.transparent,
+          color: bgColor,
           borderRadius: BorderRadius.circular(8),
           border: isSelected
               ? Border.all(color: AppColors.primary, width: 1.5)
@@ -482,9 +581,7 @@ class _CalendarDayCell extends StatelessWidget {
                     isToday ? FontWeight.w700 : FontWeight.w400,
                 color: isToday
                     ? AppColors.primary
-                    : bookings.isNotEmpty
-                        ? AppColors.danger
-                        : AppColors.textPrimary,
+                    : AppColors.textPrimary,
               ),
             ),
             if (bookings.isNotEmpty && bookings.first.customerId > 0)

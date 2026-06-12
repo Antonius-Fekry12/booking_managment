@@ -4,6 +4,8 @@ import '../../core/widgets/app_shell.dart';
 import '../../features/dashboard/presentation/dashboard_screen.dart';
 import '../../features/bookings/presentation/bookings_screen.dart';
 import '../../features/bookings/presentation/create_booking_screen.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../features/bookings/bloc/booking_detail_bloc.dart';
 import '../../features/bookings/presentation/booking_detail_screen.dart';
 import '../../features/calendar/presentation/calendar_screen.dart';
 import '../../features/customers/presentation/customers_screen.dart';
@@ -14,6 +16,7 @@ class AppRoutes {
   static const String bookings = '/bookings';
   static const String createBooking = '/bookings/create';
   static const String bookingDetail = '/bookings/:id';
+  static const String editBooking = '/bookings/:id/edit';
   static const String calendar = '/calendar';
   static const String customers = '/customers';
   static const String settings = '/settings';
@@ -48,7 +51,19 @@ final GoRouter appRouter = GoRouter(
           pageBuilder: (context, state) {
             final id = int.parse(state.pathParameters['id'] ?? '0');
             return NoTransitionPage(
-              child: BookingDetailScreen(bookingId: id),
+              child: BlocProvider(
+                create: (context) => BookingDetailBloc()..add(LoadBookingDetail(id)),
+                child: BookingDetailScreen(bookingId: id),
+              ),
+            );
+          },
+        ),
+        GoRoute(
+          path: AppRoutes.editBooking,
+          pageBuilder: (context, state) {
+            final id = int.parse(state.pathParameters['id'] ?? '0');
+            return NoTransitionPage(
+              child: CreateBookingScreen(editBookingId: id),
             );
           },
         ),

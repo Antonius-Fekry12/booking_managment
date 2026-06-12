@@ -22,9 +22,10 @@ part 'app_database.g.dart';
 ])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
+  AppDatabase.memory() : super(NativeDatabase.memory());
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -46,11 +47,20 @@ class AppDatabase extends _$AppDatabase {
           await into(settingsTable).insert(
             SettingsTableCompanion.insert(
               key: 'currency',
-              value: 'ر.س',
+              value: 'ج.م',
             ),
           );
           // Insert sample data for demo
           await _insertSampleData();
+        },
+        onUpgrade: (Migrator m, int from, int to) async {
+          if (from < 2) {
+            // Add cancellation columns to bookings table
+            await m.addColumn(bookingsTable, bookingsTable.isCancelled);
+            await m.addColumn(bookingsTable, bookingsTable.cancellationReason);
+            await m.addColumn(bookingsTable, bookingsTable.cancelledAt);
+            await m.addColumn(bookingsTable, bookingsTable.cancelledBy);
+          }
         },
       );
 
@@ -275,6 +285,29 @@ class AppDatabase extends _$AppDatabase {
       (update(bookingsTable)..where((t) => t.id.equals(id)))
           .write(const BookingsTableCompanion(isDeleted: Value(true)));
 
+  /// Cancel a booking (soft cancel — keeps record, marks isCancelled)
+  Future<int> cancelBooking(int id, String reason, {String cancelledBy = 'system'}) =>
+      (update(bookingsTable)..where((t) => t.id.equals(id))).write(
+        BookingsTableCompanion(
+          isCancelled: const Value(true),
+          cancellationReason: Value(reason),
+          cancelledAt: Value(DateTime.now()),
+          cancelledBy: Value(cancelledBy),
+          status: const Value('cancelled'),
+        ),
+      );
+
+  /// Update paid/remaining amounts after a payment is added
+  Future<int> updateBookingAmounts(
+      int id, double newPaid, double newRemaining) =>
+      (update(bookingsTable)..where((t) => t.id.equals(id))).write(
+        BookingsTableCompanion(
+          paidAmount: Value(newPaid),
+          remainingAmount: Value(newRemaining),
+          updatedAt: Value(DateTime.now()),
+        ),
+      );
+
   Future<bool> isDateBooked(DateTime date) async {
     final bookings = await getBookingsByDate(date);
     return bookings.isNotEmpty;
@@ -334,19 +367,26 @@ class AppDatabase extends _$AppDatabase {
   // ── Stats ───────────────────────────────────────────────────
   Future<Map<String, dynamic>> getDashboardStats() async {
     final all = await getAllBookings();
+    // Exclude cancelled bookings from core stats
+    final activeBookings = all.where((b) => !b.isCancelled).toList();
+    final cancelledBookings = all.where((b) => b.isCancelled).toList();
     final today = await getTodayBookings();
     final upcoming = await getUpcomingBookings();
+    // Today/upcoming already exclude isDeleted; additionally exclude cancelled
+    final activeToday = today.where((b) => !b.isCancelled).toList();
+    final activeUpcoming = upcoming.where((b) => !b.isCancelled).toList();
 
     double pendingAmount = 0;
-    for (final b in all) {
+    for (final b in activeBookings) {
       pendingAmount += b.remainingAmount;
     }
 
     return {
-      'totalBookings': all.length,
-      'todayBookings': today.length,
-      'upcomingBookings': upcoming.length,
+      'totalBookings': activeBookings.length,
+      'todayBookings': activeToday.length,
+      'upcomingBookings': activeUpcoming.length,
       'pendingPayments': pendingAmount,
+      'cancelledBookings': cancelledBookings.length,
     };
   }
 }

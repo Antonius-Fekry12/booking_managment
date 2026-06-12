@@ -1,55 +1,36 @@
 // lib/features/bookings/presentation/booking_detail_screen.dart
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:drift/drift.dart' hide Column;
 import '../../../app/theme/app_colors.dart';
-import '../../../core/providers/database_provider.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../database/app_database.dart';
-import '../../invoice/invoice_generator.dart';
 
-// ── Providers ─────────────────────────────────────────────────────────────────
-final bookingDetailProvider =
-    FutureProvider.family<Booking?, int>((ref, id) async {
-  final db = ref.watch(databaseProvider);
-  return db.getBookingById(id);
-});
-
-final bookingCustomerProvider =
-    FutureProvider.family<Customer?, int>((ref, customerId) async {
-  final db = ref.watch(databaseProvider);
-  return db.getCustomerById(customerId);
-});
-
-final bookingServicesProvider =
-    FutureProvider.family<List<BookingService>, int>((ref, bookingId) async {
-  final db = ref.watch(databaseProvider);
-  return db.getServicesForBooking(bookingId);
-});
-
-final bookingPaymentsProvider =
-    StreamProvider.family<List<Payment>, int>((ref, bookingId) {
-  final db = ref.watch(databaseProvider);
-  return db.watchPaymentsForBooking(bookingId);
-});
+import '../bloc/booking_detail_bloc.dart';
+import '../bloc/bookings_bloc.dart';
 
 // ── Screen ─────────────────────────────────────────────────────────────────────
-class BookingDetailScreen extends ConsumerStatefulWidget {
+class BookingDetailScreen extends StatefulWidget {
   final int bookingId;
   const BookingDetailScreen({super.key, required this.bookingId});
 
   @override
-  ConsumerState<BookingDetailScreen> createState() =>
+  State<BookingDetailScreen> createState() =>
       _BookingDetailScreenState();
 }
 
-class _BookingDetailScreenState
-    extends ConsumerState<BookingDetailScreen> {
+class _BookingDetailScreenState extends State<BookingDetailScreen> {
   bool _showAddPayment = false;
   final _paymentAmountCtrl = TextEditingController();
   String _paymentMethod = 'cash';
   final _paymentNotesCtrl = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    // Use context to get bloc if provided above, or we can just assume it's available
+  }
 
   @override
   void dispose() {
@@ -58,7 +39,7 @@ class _BookingDetailScreenState
     super.dispose();
   }
 
-  Future<void> _addPayment(Booking booking) async {
+  void _addPayment(Booking booking) {
     final amount = double.tryParse(_paymentAmountCtrl.text);
     if (amount == null || amount <= 0) return;
     if (amount > booking.remainingAmount) {
@@ -72,34 +53,16 @@ class _BookingDetailScreenState
       return;
     }
 
-    final db = ref.read(databaseProvider);
-    await db.addPayment(
-      PaymentsTableCompanion.insert(
-        bookingId: booking.id,
-        amount: amount,
-        paymentMethod: Value(_paymentMethod),
-        notes: Value(_paymentNotesCtrl.text.isEmpty
-            ? null
-            : _paymentNotesCtrl.text),
-      ),
+    final payment = PaymentsTableCompanion.insert(
+      bookingId: booking.id,
+      amount: amount,
+      paymentMethod: Value(_paymentMethod),
+      notes: Value(_paymentNotesCtrl.text.isEmpty
+          ? null
+          : _paymentNotesCtrl.text),
     );
 
-    final newPaid = booking.paidAmount + amount;
-    final newRemaining = booking.remainingAmount - amount;
-
-    await db.updateBooking(
-      BookingsTableCompanion(
-        id: Value(booking.id),
-        paidAmount: Value(newPaid),
-        remainingAmount: Value(newRemaining),
-        status: Value(newRemaining <= 0 ? 'confirmed' : booking.status),
-        updatedAt: Value(DateTime.now()),
-      ),
-    );
-
-    // Refresh
-    ref.invalidate(bookingDetailProvider(widget.bookingId));
-    ref.invalidate(bookingPaymentsProvider(widget.bookingId));
+    context.read<BookingDetailBloc>().add(AddPaymentEvent(payment));
 
     setState(() {
       _showAddPayment = false;
@@ -108,76 +71,150 @@ class _BookingDetailScreenState
     });
   }
 
-  Future<void> _cancelBooking(Booking booking) async {
-    final confirm = await showDialog<bool>(
+  void _cancelBooking(Booking booking) async {
+    final reasonCtrl = TextEditingController();
+    String? validationError;
+
+    final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('إلغاء الحجز',
-            style: TextStyle(fontFamily: 'Cairo')),
-        content: const Text(
-            'هل أنت متأكد من إلغاء هذا الحجز؟ لا يمكن التراجع عن هذا الإجراء.',
-            style: TextStyle(fontFamily: 'Cairo')),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('تراجع', style: TextStyle(fontFamily: 'Cairo')),
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('إلغاء الحجز',
+              style: TextStyle(fontFamily: 'Cairo', color: AppColors.danger)),
+          content: SizedBox(
+            width: 400,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'هل أنت متأكد من إلغاء هذا الحجز؟ لن يتم حذف السجل من قاعدة البيانات.',
+                  style: TextStyle(fontFamily: 'Cairo'),
+                ),
+                const SizedBox(height: 16),
+                const Text('سبب الإلغاء *',
+                    style: TextStyle(
+                        fontFamily: 'Cairo',
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600)),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: reasonCtrl,
+                  maxLines: 3,
+                  decoration: InputDecoration(
+                    hintText: 'ادخل سبب الإلغاء...',
+                    hintStyle:
+                        const TextStyle(fontFamily: 'Cairo', color: AppColors.textTertiary),
+                    errorText: validationError,
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              ],
+            ),
           ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.danger),
-            child: const Text('إلغاء الحجز',
-                style: TextStyle(fontFamily: 'Cairo')),
-          ),
-        ],
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('تراجع', style: TextStyle(fontFamily: 'Cairo')),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                if (reasonCtrl.text.trim().isEmpty) {
+                  setDialogState(() =>
+                      validationError = 'سبب الإلغاء مطلوب');
+                  return;
+                }
+                Navigator.pop(ctx, true);
+              },
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.danger),
+              child: const Text('تأكيد الإلغاء',
+                  style: TextStyle(fontFamily: 'Cairo')),
+            ),
+          ],
+        ),
       ),
     );
 
-    if (confirm == true) {
-      final db = ref.read(databaseProvider);
-      await db.softDeleteBooking(booking.id);
-      if (mounted) context.go('/bookings');
+    if (confirmed == true && mounted) {
+      context
+          .read<BookingDetailBloc>()
+          .add(CancelBookingDetailEvent(reasonCtrl.text.trim()));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('تم إلغاء الحجز بنجاح',
+              style: TextStyle(fontFamily: 'Cairo')),
+          backgroundColor: AppColors.danger,
+        ),
+      );
     }
+    reasonCtrl.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final bookingAsync =
-        ref.watch(bookingDetailProvider(widget.bookingId));
+    return BlocListener<BookingDetailBloc, BookingDetailState>(
+      listenWhen: (previous, current) {
+        final prevCancelled = previous.booking?.isCancelled ?? false;
+        final currCancelled = current.booking?.isCancelled ?? false;
+        return (current.paymentAdded && !previous.paymentAdded) ||
+            (currCancelled && !prevCancelled);
+      },
+      listener: (context, state) {
+        // Reload the main bookings list when a payment is added or a booking is cancelled
+        context.read<BookingsBloc>().add(LoadAllBookings());
 
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      body: bookingAsync.when(
-        loading: () =>
-            const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('خطأ: $e')),
-        data: (booking) {
-          if (booking == null) {
-            return const Center(child: Text('الحجز غير موجود'));
-          }
-          return _buildContent(booking);
-        },
+        if (state.paymentAdded) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('تم إضافة الدفعة بنجاح',
+                  style: TextStyle(fontFamily: 'Cairo')),
+              backgroundColor: AppColors.success,
+            ),
+          );
+        }
+      },
+      child: Scaffold(
+        backgroundColor: AppColors.background,
+        body: BlocBuilder<BookingDetailBloc, BookingDetailState>(
+          builder: (context, state) {
+            if (state.status == BookingDetailStatus.loading || state.status == BookingDetailStatus.initial) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (state.status == BookingDetailStatus.failure) {
+              return Center(child: Text('خطأ: ${state.errorMessage}'));
+            }
+            final booking = state.booking;
+            if (booking == null) {
+              return const Center(child: Text('الحجز غير موجود'));
+            }
+            return _buildContent(context, state);
+          },
+        ),
       ),
     );
   }
 
-  Widget _buildContent(Booking booking) {
-    final customerAsync =
-        ref.watch(bookingCustomerProvider(booking.customerId));
-    final servicesAsync =
-        ref.watch(bookingServicesProvider(widget.bookingId));
-    final paymentsAsync =
-        ref.watch(bookingPaymentsProvider(widget.bookingId));
+  Widget _buildContent(BuildContext context, BookingDetailState state) {
+    final booking = state.booking!;
+    final customer = state.customer;
+    final services = state.services;
+    final payments = state.payments;
+    final isCancelled = booking.isCancelled;
 
     return Column(
       children: [
         _buildTopBar(booking),
+        // Cancellation banner
+        if (isCancelled) _buildCancelledBanner(booking),
         Expanded(
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Left: Financial summary
-              _buildFinancialPanel(booking, paymentsAsync),
+              _buildFinancialPanel(context, booking, payments),
               // Center: Main content
               Expanded(
                 child: SingleChildScrollView(
@@ -186,28 +223,28 @@ class _BookingDetailScreenState
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       // Header: Customer + booking number
-                      _buildBookingHeader(booking, customerAsync),
+                      _buildBookingHeader(booking, customer),
                       const SizedBox(height: 16),
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           // Customer data
                           Expanded(
-                            child: _buildCustomerCard(customerAsync),
+                            child: _buildCustomerCard(customer),
                           ),
                           const SizedBox(width: 16),
                           // Event + services
                           Expanded(
-                            child: _buildEventCard(booking, servicesAsync),
+                            child: _buildEventCard(booking, services),
                           ),
                         ],
                       ),
                       const SizedBox(height: 16),
-                      // Action buttons
-                      _buildActionButtons(booking),
+                      // Action buttons (disabled if cancelled)
+                      if (!isCancelled) _buildActionButtons(booking),
                       const SizedBox(height: 16),
                       // Add payment panel
-                      if (_showAddPayment)
+                      if (_showAddPayment && !isCancelled)
                         _buildAddPaymentPanel(booking),
                       const SizedBox(height: 16),
                       // Info row at bottom
@@ -258,19 +295,7 @@ class _BookingDetailScreenState
           // PDF button
           ElevatedButton.icon(
             onPressed: () async {
-              final db = ref.read(databaseProvider);
-              final customer = await db.getCustomerById(booking.customerId);
-              final services = await db.getServicesForBooking(booking.id);
-              final payments = await db.getPaymentsForBooking(booking.id);
-              if (customer != null && mounted) {
-                await InvoiceGenerator.generate(
-                  context: context,
-                  booking: booking,
-                  customer: customer,
-                  services: services,
-                  payments: payments,
-                );
-              }
+              // TODO: Implement invoice generator with BLoC
             },
             icon: const Icon(Icons.picture_as_pdf_rounded, size: 16),
             label: const Text('إصدار فاتورة PDF'),
@@ -280,9 +305,55 @@ class _BookingDetailScreenState
     );
   }
 
+  Widget _buildCancelledBanner(Booking booking) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+      color: AppColors.dangerLight,
+      child: Row(
+        children: [
+          const Icon(Icons.cancel_rounded, color: AppColors.danger, size: 20),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'هذا الحجز ملغي',
+                  style: TextStyle(
+                    fontFamily: 'Cairo',
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                    color: AppColors.danger,
+                  ),
+                ),
+                if (booking.cancellationReason != null)
+                  Text(
+                    'سبب الإلغاء: ${booking.cancellationReason}',
+                    style: const TextStyle(
+                        fontFamily: 'Cairo',
+                        fontSize: 12,
+                        color: AppColors.danger),
+                  ),
+                if (booking.cancelledAt != null)
+                  Text(
+                    'تاريخ الإلغاء: ${AppFormatters.formatDateTime(booking.cancelledAt!)}',
+                    style: const TextStyle(
+                        fontFamily: 'Cairo',
+                        fontSize: 12,
+                        color: AppColors.danger),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildBookingHeader(
-      Booking booking, AsyncValue<Customer?> customerAsync) {
-    final name = customerAsync.valueOrNull?.name ?? '...';
+      Booking booking, Customer? customer) {
+    final name = customer?.name ?? '...';
     final statusColor = _statusColor(booking.status);
 
     return Container(
@@ -370,7 +441,7 @@ class _BookingDetailScreenState
     );
   }
 
-  Widget _buildCustomerCard(AsyncValue<Customer?> customerAsync) {
+  Widget _buildCustomerCard(Customer? customer) {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -393,40 +464,33 @@ class _BookingDetailScreenState
           const SizedBox(height: 16),
           const Divider(height: 1),
           const SizedBox(height: 16),
-          customerAsync.when(
-            loading: () =>
-                const CircularProgressIndicator(),
-            error: (e, _) => Text('$e'),
-            data: (customer) {
-              if (customer == null) {
-                return const Text('لا توجد بيانات',
-                    style: TextStyle(fontFamily: 'Cairo'));
-              }
-              return Column(
-                children: [
+          if (customer == null)
+            const Text('لا توجد بيانات',
+                style: TextStyle(fontFamily: 'Cairo'))
+          else
+            Column(
+              children: [
+                _InfoRow(
+                  icon: Icons.phone_rounded,
+                  label: 'رقم الهاتف',
+                  value: customer.phone,
+                ),
+                const SizedBox(height: 12),
+                if (customer.social != null)
                   _InfoRow(
-                    icon: Icons.phone_rounded,
-                    label: 'رقم الهاتف',
-                    value: customer.phone,
+                    icon: Icons.alternate_email_rounded,
+                    label: 'التواصل الاجتماعي',
+                    value: customer.social!,
                   ),
-                  const SizedBox(height: 12),
-                  if (customer.social != null)
-                    _InfoRow(
-                      icon: Icons.alternate_email_rounded,
-                      label: 'التواصل الاجتماعي',
-                      value: customer.social!,
-                    ),
-                ],
-              );
-            },
-          ),
+              ],
+            ),
         ],
       ),
     );
   }
 
   Widget _buildEventCard(
-      Booking booking, AsyncValue<List<BookingService>> servicesAsync) {
+      Booking booking, List<BookingService> services) {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -465,48 +529,41 @@ class _BookingDetailScreenState
                 ?.copyWith(fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 12),
-          servicesAsync.when(
-            loading: () =>
-                const CircularProgressIndicator(),
-            error: (e, _) => Text('$e'),
-            data: (services) {
-              if (services.isEmpty) {
-                return const Text('لا خدمات',
-                    style: TextStyle(
-                        fontFamily: 'Cairo', color: AppColors.textSecondary));
-              }
-              return Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: services.map((s) {
-                  return Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: AppColors.primaryLighter,
-                      borderRadius: BorderRadius.circular(20),
+          if (services.isEmpty)
+            const Text('لا خدمات',
+                style: TextStyle(
+                    fontFamily: 'Cairo', color: AppColors.textSecondary))
+          else
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: services.map((s) {
+                return Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: AppColors.primaryLighter,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    AppConstants.getServiceLabel(s.serviceName),
+                    style: const TextStyle(
+                      fontFamily: 'Cairo',
+                      fontSize: 13,
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.w500,
                     ),
-                    child: Text(
-                      AppConstants.getServiceLabel(s.serviceName),
-                      style: const TextStyle(
-                        fontFamily: 'Cairo',
-                        fontSize: 13,
-                        color: AppColors.primary,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  );
-                }).toList(),
-              );
-            },
-          ),
+                  ),
+                );
+              }).toList(),
+            ),
         ],
       ),
     );
   }
 
-  Widget _buildFinancialPanel(
-      Booking booking, AsyncValue<List<Payment>> paymentsAsync) {
+  Widget _buildFinancialPanel(BuildContext context,
+      Booking booking, List<Payment> payments) {
     final paidPercent = booking.totalAmount > 0
         ? (booking.paidAmount / booking.totalAmount).clamp(0.0, 1.0)
         : 0.0;
@@ -546,7 +603,7 @@ class _BookingDetailScreenState
                 fontWeight: FontWeight.w700,
               ),
             ),
-            const Text('ر.س',
+            const Text('ج.م',
                 style: TextStyle(
                     fontFamily: 'Cairo',
                     fontSize: 13,
@@ -616,29 +673,35 @@ class _BookingDetailScreenState
             const SizedBox(height: 20),
             const Divider(height: 1),
             const SizedBox(height: 16),
-            Text('آخر الدفعات',
-                style: Theme.of(context).textTheme.titleSmall),
-            const SizedBox(height: 12),
-            paymentsAsync.when(
-              loading: () =>
-                  const CircularProgressIndicator(),
-              error: (e, _) => Text('$e'),
-              data: (payments) {
-                if (payments.isEmpty) {
-                  return const Text('لا توجد دفعات',
-                      style: TextStyle(
-                          fontFamily: 'Cairo',
-                          color: AppColors.textSecondary,
-                          fontSize: 13));
-                }
-                return Column(
-                  children: payments
-                      .take(5)
-                      .map((p) => _PaymentItem(payment: p))
-                      .toList(),
-                );
-              },
+            // Payment History
+            Row(
+              children: [
+                Text('سجل الدفعات',
+                    style: Theme.of(context).textTheme.titleSmall),
+                const Spacer(),
+                Text('${payments.length} دفعة',
+                    style: const TextStyle(
+                        fontFamily: 'Cairo',
+                        fontSize: 12,
+                        color: AppColors.textTertiary)),
+              ],
             ),
+            const SizedBox(height: 8),
+            if (payments.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Text('لا توجد دفعات',
+                    style: TextStyle(
+                        fontFamily: 'Cairo',
+                        color: AppColors.textSecondary,
+                        fontSize: 13)),
+              )
+            else
+              Column(
+                children: payments
+                    .map((p) => _PaymentHistoryRow(payment: p))
+                    .toList(),
+              ),
             const SizedBox(height: 20),
             // Camera promo
             Container(
@@ -724,7 +787,7 @@ class _BookingDetailScreenState
         const SizedBox(width: 12),
         Expanded(
           child: OutlinedButton.icon(
-            onPressed: () {},
+            onPressed: () => context.push('/bookings/${booking.id}/edit'),
             icon: const Icon(Icons.edit_rounded, size: 18),
             label: const Text('تعديل'),
           ),
@@ -780,7 +843,7 @@ class _BookingDetailScreenState
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('المبلغ (ر.س)',
+                    const Text('المبلغ (ج.م)',
                         style: TextStyle(
                             fontFamily: 'Cairo',
                             fontSize: 13,
@@ -801,7 +864,7 @@ class _BookingDetailScreenState
                         hintStyle: const TextStyle(
                             fontFamily: 'Cairo',
                             color: AppColors.textTertiary),
-                        suffixText: 'ر.س',
+                        suffixText: 'ج.م',
                       ),
                     ),
                   ],
@@ -1030,7 +1093,7 @@ class _AmountBox extends StatelessWidget {
               color: color,
             ),
           ),
-          Text('ر.س',
+           Text('ج.م',
               style: TextStyle(
                   fontFamily: 'Cairo', fontSize: 11, color: color)),
         ],
@@ -1039,49 +1102,7 @@ class _AmountBox extends StatelessWidget {
   }
 }
 
-class _PaymentItem extends StatelessWidget {
-  final Payment payment;
 
-  const _PaymentItem({required this.payment});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        children: [
-          Container(
-            width: 8,
-            height: 8,
-            decoration: BoxDecoration(
-              color: AppColors.success,
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              '${AppConstants.getPaymentMethodLabel(payment.paymentMethod)} - ${payment.notes ?? ""}',
-              style: const TextStyle(
-                  fontFamily: 'Cairo',
-                  fontSize: 12,
-                  color: AppColors.textSecondary),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          Text(
-            '${payment.amount.toStringAsFixed(0)} ر.س',
-            style: const TextStyle(
-              fontFamily: 'Cairo',
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 class _InfoTile extends StatelessWidget {
   final IconData icon;
@@ -1118,6 +1139,85 @@ class _InfoTile extends StatelessWidget {
                       fontWeight: FontWeight.w600,
                     )),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PaymentHistoryRow extends StatelessWidget {
+  final Payment payment;
+
+  const _PaymentHistoryRow({required this.payment});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceVariant,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          // Method icon
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: AppColors.successLight,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(Icons.payments_rounded,
+                color: AppColors.success, size: 16),
+          ),
+          const SizedBox(width: 10),
+          // Method + Notes
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  AppConstants.getPaymentMethodLabel(payment.paymentMethod),
+                  style: const TextStyle(
+                    fontFamily: 'Cairo',
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (payment.notes != null && payment.notes!.isNotEmpty)
+                  Text(
+                    payment.notes!,
+                    style: const TextStyle(
+                        fontFamily: 'Cairo',
+                        fontSize: 11,
+                        color: AppColors.textSecondary),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Date
+          Text(
+            AppFormatters.formatDateShort(payment.paymentDate),
+            style: const TextStyle(
+                fontFamily: 'Cairo',
+                fontSize: 11,
+                color: AppColors.textTertiary),
+          ),
+          const SizedBox(width: 12),
+          // Amount
+          Text(
+            '${payment.amount.toStringAsFixed(0)} ج.م',
+            style: const TextStyle(
+              fontFamily: 'Cairo',
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: AppColors.success,
             ),
           ),
         ],
